@@ -426,6 +426,142 @@ func TestIsNetworkRemoteURL(t *testing.T) {
 	}
 }
 
+func TestResolveRepoIdentity(t *testing.T) {
+	makeRepo := func(t *testing.T, name string) string {
+		t.Helper()
+		root := t.TempDir()
+		repo := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+			t.Fatalf("failed to create fake repo: %v", err)
+		}
+		return repo
+	}
+
+	t.Run("auto-detect from in-repo cwd", func(t *testing.T) {
+		repo := makeRepo(t, "myrepo")
+		nested := filepath.Join(repo, "sub", "dir")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		got, err := resolveRepoIdentity(nested, "", false, false, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceAutoDetect {
+			t.Fatalf("Source = %v, want autoDetect", got.Source)
+		}
+		if got.Name != "myrepo" {
+			t.Fatalf("Name = %q, want %q", got.Name, "myrepo")
+		}
+		if got.Path != repo {
+			t.Fatalf("Path = %q, want %q", got.Path, repo)
+		}
+	})
+
+	t.Run("auto-detect outside repo returns none", func(t *testing.T) {
+		dir := t.TempDir()
+		got, err := resolveRepoIdentity(dir, "", false, false, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceNone {
+			t.Fatalf("Source = %v, want none", got.Source)
+		}
+	})
+
+	t.Run("--no-git in repo returns none", func(t *testing.T) {
+		repo := makeRepo(t, "myrepo")
+		got, err := resolveRepoIdentity(repo, "", false, true, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceNone {
+			t.Fatalf("Source = %v, want none", got.Source)
+		}
+	})
+
+	t.Run("--git <path>", func(t *testing.T) {
+		repo := makeRepo(t, "fromflag")
+		got, err := resolveRepoIdentity("/tmp", repo, true, false, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceFlagPath {
+			t.Fatalf("Source = %v, want flagPath", got.Source)
+		}
+		if got.Name != "fromflag" {
+			t.Fatalf("Name = %q, want %q", got.Name, "fromflag")
+		}
+	})
+
+	t.Run("--git <https url>", func(t *testing.T) {
+		got, err := resolveRepoIdentity("/tmp", "https://github.com/foo/bar.git", true, false, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceFlagURL {
+			t.Fatalf("Source = %v, want flagURL", got.Source)
+		}
+		if got.Name != "bar" {
+			t.Fatalf("Name = %q, want %q", got.Name, "bar")
+		}
+		if got.URL != "https://github.com/foo/bar.git" {
+			t.Fatalf("URL = %q", got.URL)
+		}
+	})
+
+	t.Run("--git <ssh url>", func(t *testing.T) {
+		got, err := resolveRepoIdentity("/tmp", "git@github.com:foo/baz.git", true, false, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceFlagURL {
+			t.Fatalf("Source = %v, want flagURL", got.Source)
+		}
+		if got.Name != "baz" {
+			t.Fatalf("Name = %q, want %q", got.Name, "baz")
+		}
+	})
+
+	t.Run("--git + --no-git is an error", func(t *testing.T) {
+		if _, err := resolveRepoIdentity("/tmp", "https://x/y.git", true, true, false); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("--no-clean + --no-git is an error", func(t *testing.T) {
+		if _, err := resolveRepoIdentity("/tmp", "", false, true, true); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("--no-clean + --git <url> is an error", func(t *testing.T) {
+		if _, err := resolveRepoIdentity("/tmp", "https://x/y.git", true, false, true); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("--no-clean without a repo is an error", func(t *testing.T) {
+		dir := t.TempDir()
+		if _, err := resolveRepoIdentity(dir, "", false, false, true); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("--git with empty value is an error", func(t *testing.T) {
+		if _, err := resolveRepoIdentity("/tmp", "  ", true, false, false); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("--git <bad path> is an error", func(t *testing.T) {
+		bogus := filepath.Join(t.TempDir(), "no-such-dir")
+		if _, err := resolveRepoIdentity("/tmp", bogus, true, false, false); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
 func TestRepoNameFromURL(t *testing.T) {
 	tests := []struct {
 		url     string

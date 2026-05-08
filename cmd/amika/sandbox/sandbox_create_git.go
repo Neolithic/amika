@@ -373,6 +373,72 @@ func runGitOutput(repo string, args ...string) (string, error) {
 	return string(out), nil
 }
 
+type repoSource int
+
+const (
+	repoSourceNone repoSource = iota
+	repoSourceAutoDetect
+	repoSourceFlagPath
+	repoSourceFlagURL
+)
+
+type repoIdentity struct {
+	Name   string
+	Source repoSource
+	Path   string
+	URL    string
+}
+
+// resolveRepoIdentity decides which git repo (if any) should back a sandbox
+// based on the user's flag input and the working directory.
+//
+//   - --git and --no-git are mutually exclusive.
+//   - --no-clean and --no-git are mutually exclusive.
+//   - --no-clean is only meaningful when a local-path repo is sourced
+//     (auto-detect or --git <path>).
+//   - When neither --git nor --no-git is set, the function walks up from cwd
+//     to detect a repo; if none is found, identity is repoSourceNone.
+func resolveRepoIdentity(cwd, gitFlag string, gitFlagSet, noGit, noClean bool) (repoIdentity, error) {
+	if gitFlagSet && noGit {
+		return repoIdentity{}, fmt.Errorf("--git and --no-git are mutually exclusive")
+	}
+	if noClean && noGit {
+		return repoIdentity{}, fmt.Errorf("--no-clean and --no-git are mutually exclusive")
+	}
+	if noGit {
+		return repoIdentity{Source: repoSourceNone}, nil
+	}
+	if gitFlagSet {
+		v := strings.TrimSpace(gitFlag)
+		if v == "" {
+			return repoIdentity{}, fmt.Errorf("--git requires a non-empty value")
+		}
+		if isNetworkRemoteURL(v) {
+			if noClean {
+				return repoIdentity{}, fmt.Errorf("--no-clean cannot be used with a git URL")
+			}
+			name, err := repoNameFromURL(v)
+			if err != nil {
+				return repoIdentity{}, err
+			}
+			return repoIdentity{Name: name, Source: repoSourceFlagURL, URL: v}, nil
+		}
+		repoRoot, err := resolveGitRoot(v)
+		if err != nil {
+			return repoIdentity{}, fmt.Errorf("could not find git repo at %q: %w", v, err)
+		}
+		return repoIdentity{Name: filepath.Base(repoRoot), Source: repoSourceFlagPath, Path: repoRoot}, nil
+	}
+	repoRoot, err := resolveGitRoot(cwd)
+	if err != nil {
+		if noClean {
+			return repoIdentity{}, fmt.Errorf("--no-clean requires a git repo, but none was detected from %q", cwd)
+		}
+		return repoIdentity{Source: repoSourceNone}, nil
+	}
+	return repoIdentity{Name: filepath.Base(repoRoot), Source: repoSourceAutoDetect, Path: repoRoot}, nil
+}
+
 // repoNameFromURL extracts the repo name from a git URL.
 // Examples:
 //
