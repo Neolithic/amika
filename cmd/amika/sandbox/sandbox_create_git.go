@@ -4,6 +4,7 @@ package sandboxcmd
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -370,6 +371,44 @@ func runGitOutput(repo string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s failed: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+// repoNameFromURL extracts the repo name from a git URL.
+// Examples:
+//
+//	https://github.com/foo/bar       -> bar
+//	https://github.com/foo/bar.git   -> bar
+//	git@github.com:foo/bar.git       -> bar
+//	ssh://git@github.com/foo/bar.git -> bar
+func repoNameFromURL(rawURL string) (string, error) {
+	s := strings.TrimSpace(rawURL)
+	if s == "" {
+		return "", fmt.Errorf("empty git URL")
+	}
+	var pathPart string
+	if strings.Contains(s, "://") {
+		u, err := url.Parse(s)
+		if err != nil {
+			return "", fmt.Errorf("parsing git URL %q: %w", rawURL, err)
+		}
+		pathPart = u.Path
+	} else if i := strings.Index(s, ":"); i >= 0 {
+		pathPart = s[i+1:]
+	} else {
+		return "", fmt.Errorf("not a git URL: %q", rawURL)
+	}
+	pathPart = strings.TrimSuffix(strings.TrimSpace(pathPart), "/")
+	if pathPart == "" {
+		return "", fmt.Errorf("git URL %q has no repo path", rawURL)
+	}
+	if i := strings.LastIndex(pathPart, "/"); i >= 0 {
+		pathPart = pathPart[i+1:]
+	}
+	pathPart = strings.TrimSuffix(pathPart, ".git")
+	if pathPart == "" {
+		return "", fmt.Errorf("could not extract repo name from %q", rawURL)
+	}
+	return pathPart, nil
 }
 
 func resolveGitURL(value string) (string, error) {

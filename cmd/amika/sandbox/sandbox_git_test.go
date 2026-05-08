@@ -426,6 +426,47 @@ func TestIsNetworkRemoteURL(t *testing.T) {
 	}
 }
 
+func TestRepoNameFromURL(t *testing.T) {
+	tests := []struct {
+		url     string
+		want    string
+		wantErr bool
+	}{
+		{url: "https://github.com/foo/bar", want: "bar"},
+		{url: "https://github.com/foo/bar.git", want: "bar"},
+		{url: "https://github.com/foo/bar/", want: "bar"},
+		{url: "http://example.com/foo/bar.git", want: "bar"},
+		{url: "git@github.com:foo/bar.git", want: "bar"},
+		{url: "git@github.com:foo/bar", want: "bar"},
+		{url: "ssh://git@github.com/foo/bar.git", want: "bar"},
+		{url: "ssh://git@github.com:22/foo/bar.git", want: "bar"},
+		{url: "https://gitlab.com/group/subgroup/repo.git", want: "repo"},
+		{url: "  https://github.com/foo/bar.git  ", want: "bar"},
+		{url: "", wantErr: true},
+		{url: "   ", wantErr: true},
+		{url: "https://github.com/", wantErr: true},
+		{url: "https://github.com", wantErr: true},
+		{url: "just-a-name", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			got, err := repoNameFromURL(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("repoNameFromURL(%q) = %q, want error", tt.url, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("repoNameFromURL(%q) unexpected error: %v", tt.url, err)
+			}
+			if got != tt.want {
+				t.Fatalf("repoNameFromURL(%q) = %q, want %q", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsLocalBranchReachableFromRemote(t *testing.T) {
 	// Set up a bare repo to act as "origin" and a working clone.
 	bare := t.TempDir()
