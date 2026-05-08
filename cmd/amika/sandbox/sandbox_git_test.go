@@ -643,6 +643,42 @@ func TestResolveRepoIdentity(t *testing.T) {
 	})
 }
 
+func TestFormatRepoBanner(t *testing.T) {
+	tests := []struct {
+		name     string
+		identity repoIdentity
+		want     string
+	}{
+		{
+			name:     "none",
+			identity: repoIdentity{Source: repoSourceNone},
+			want:     "Creating a bare sandbox with no repos.",
+		},
+		{
+			name:     "auto-detect",
+			identity: repoIdentity{Source: repoSourceAutoDetect, Name: "myrepo"},
+			want:     "Creating sandbox with repo myrepo",
+		},
+		{
+			name:     "flag-path",
+			identity: repoIdentity{Source: repoSourceFlagPath, Name: "frompath"},
+			want:     "Creating sandbox with repo frompath",
+		},
+		{
+			name:     "flag-url",
+			identity: repoIdentity{Source: repoSourceFlagURL, Name: "fromurl"},
+			want:     "Creating sandbox with repo fromurl",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatRepoBanner(tt.identity); got != tt.want {
+				t.Fatalf("formatRepoBanner = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRepoNameFromURL(t *testing.T) {
 	tests := []struct {
 		url     string

@@ -235,15 +235,6 @@ func TestParsePortFlags(t *testing.T) {
 	}
 }
 
-func TestValidateGitFlags(t *testing.T) {
-	if err := validateGitFlags(false, true); err == nil {
-		t.Fatal("expected error when --no-clean is used without --git")
-	}
-	if err := validateGitFlags(true, true); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
 func TestValidateShell(t *testing.T) {
 	if err := validateShell("zsh"); err != nil {
 		t.Fatalf("unexpected error: %v", err)

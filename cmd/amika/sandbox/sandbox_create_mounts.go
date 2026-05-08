@@ -279,11 +279,11 @@ func validateMountTargets(bindMounts, volumeMounts []sandbox.MountBinding) error
 	return nil
 }
 
-func validateGitFlags(gitEnabled, noClean bool) error {
-	if noClean && !gitEnabled {
-		return fmt.Errorf("--no-clean requires --git")
+func formatRepoBanner(identity repoIdentity) string {
+	if identity.Source == repoSourceNone {
+		return "Creating a bare sandbox with no repos."
 	}
-	return nil
+	return fmt.Sprintf("Creating sandbox with repo %s", identity.Name)
 }
 
 func hasEnvKey(env []string, key string) bool {
