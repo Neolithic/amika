@@ -110,6 +110,51 @@ func cloneGitRepo(src, dst string) error {
 	return nil
 }
 
+func cloneGitURL(src, dst string) error {
+	cmd := exec.Command("git", "clone", src, dst)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to clone %q: %s", src, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// prepareGitMountFromURL clones a remote URL into a temporary directory and
+// returns a mount that exposes the cloned tree to the sandbox.
+func prepareGitMountFromURL(rawURL string, cloneFn func(src, dst string) error, branch, newBranch string) (gitMountInfo, func(), error) {
+	name, err := repoNameFromURL(rawURL)
+	if err != nil {
+		return gitMountInfo{}, func() {}, err
+	}
+	target := path.Join(sandbox.SandboxWorkdir, name)
+	tmpDir, err := os.MkdirTemp("", "amika-git-mount-*")
+	if err != nil {
+		return gitMountInfo{}, func() {}, fmt.Errorf("failed to create temp directory for git mount: %w", err)
+	}
+	preparedRepo := filepath.Join(tmpDir, name)
+	if err := cloneFn(rawURL, preparedRepo); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return gitMountInfo{}, func() {}, err
+	}
+	if err := applyBranchCheckout(preparedRepo, branch, newBranch); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return gitMountInfo{}, func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(tmpDir) }
+	return gitMountInfo{
+		RepoName: name,
+		RepoRoot: rawURL,
+		NoClean:  false,
+		Mount: sandbox.MountBinding{
+			Type:         "bind",
+			Source:       preparedRepo,
+			Target:       target,
+			Mode:         "rwcopy",
+			SnapshotFrom: rawURL,
+		},
+	}, cleanup, nil
+}
+
 func branchOrRemoteExists(repoDir, branch string) bool {
 	for _, ref := range []string{"refs/heads/" + branch, "refs/remotes/origin/" + branch} {
 		cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "--quiet", ref)

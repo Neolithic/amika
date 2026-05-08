@@ -287,6 +287,87 @@ func TestPrepareGitMount_CleanClone_BranchAndNewBranchCreatesBase(t *testing.T) 
 	}
 }
 
+func TestPrepareGitMountFromURL(t *testing.T) {
+	source := createGitRepo(t, nil)
+	fakeURL := "https://example.com/foo/myrepo.git"
+
+	var seenSrc, seenDst string
+	cloneFn := func(src, dst string) error {
+		seenSrc = src
+		seenDst = dst
+		cmd := exec.Command("git", "clone", "--local", "--no-hardlinks", source, dst)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("clone failed: %s", out)
+		}
+		return nil
+	}
+
+	info, cleanup, err := prepareGitMountFromURL(fakeURL, cloneFn, "", "")
+	if err != nil {
+		t.Fatalf("prepareGitMountFromURL failed: %v", err)
+	}
+	defer cleanup()
+
+	if seenSrc != fakeURL {
+		t.Fatalf("cloneFn src = %q, want %q", seenSrc, fakeURL)
+	}
+	if seenDst != info.Mount.Source {
+		t.Fatalf("cloneFn dst = %q, want %q", seenDst, info.Mount.Source)
+	}
+	if info.RepoName != "myrepo" {
+		t.Fatalf("RepoName = %q, want %q", info.RepoName, "myrepo")
+	}
+	if info.RepoRoot != fakeURL {
+		t.Fatalf("RepoRoot = %q, want %q", info.RepoRoot, fakeURL)
+	}
+	wantTarget := "/home/amika/workspace/myrepo"
+	if info.Mount.Target != wantTarget {
+		t.Fatalf("Mount.Target = %q, want %q", info.Mount.Target, wantTarget)
+	}
+	if info.Mount.Mode != "rwcopy" {
+		t.Fatalf("Mount.Mode = %q, want rwcopy", info.Mount.Mode)
+	}
+	if info.Mount.SnapshotFrom != fakeURL {
+		t.Fatalf("Mount.SnapshotFrom = %q, want %q", info.Mount.SnapshotFrom, fakeURL)
+	}
+	if _, err := os.Stat(filepath.Join(info.Mount.Source, "README.md")); err != nil {
+		t.Fatalf("expected README.md in cloned repo: %v", err)
+	}
+
+	tmpDir := filepath.Dir(info.Mount.Source)
+	cleanup()
+	if _, err := os.Stat(tmpDir); !os.IsNotExist(err) {
+		t.Fatalf("expected temp git clone directory to be removed, err=%v", err)
+	}
+}
+
+func TestPrepareGitMountFromURL_BadURL(t *testing.T) {
+	cloneFn := func(_, _ string) error {
+		t.Fatal("cloneFn should not be called for a bad URL")
+		return nil
+	}
+	if _, _, err := prepareGitMountFromURL("", cloneFn, "", ""); err == nil {
+		t.Fatal("expected error for empty URL")
+	}
+	if _, _, err := prepareGitMountFromURL("https://github.com/", cloneFn, "", ""); err == nil {
+		t.Fatal("expected error for URL without path")
+	}
+}
+
+func TestPrepareGitMountFromURL_CloneFails(t *testing.T) {
+	cloneFn := func(_, _ string) error {
+		return fmt.Errorf("simulated clone failure")
+	}
+	_, _, err := prepareGitMountFromURL("https://example.com/foo/bar.git", cloneFn, "", "")
+	if err == nil {
+		t.Fatal("expected clone failure to surface")
+	}
+	if !strings.Contains(err.Error(), "simulated clone failure") {
+		t.Fatalf("error = %v, want it to mention the clone failure", err)
+	}
+}
+
 func TestConfigReadFromPreparedRepo(t *testing.T) {
 	root := createGitRepo(t, map[string]string{
 		"origin": "https://github.com/example/upstream.git",
