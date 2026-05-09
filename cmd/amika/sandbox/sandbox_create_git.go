@@ -537,10 +537,10 @@ func resolveGitURL(value string) (string, error) {
 	}
 	origin, ok := remotes["origin"]
 	if !ok {
-		return "", fmt.Errorf("no origin remote found in %q; specify a git HTTP(S) or SSH URL directly with --git <url>", repoRoot)
+		return "", fmt.Errorf("no origin remote found in %q; specify a git HTTP(S) or SSH URL directly with --git <url>, or pass --no-git to create a sandbox without a repo", repoRoot)
 	}
 	if !isNetworkRemoteURL(origin) {
-		return "", fmt.Errorf("origin remote %q is a local path; specify a git HTTP(S) or SSH URL directly with --git <url>", origin)
+		return "", fmt.Errorf("origin remote %q is a local path; specify a git HTTP(S) or SSH URL directly with --git <url>, or pass --no-git to create a sandbox without a repo", origin)
 	}
 	return origin, nil
 }
