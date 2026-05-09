@@ -121,6 +121,11 @@ func cloneGitURL(src, dst string) error {
 
 // prepareGitMountFromURL clones a remote URL into a temporary directory and
 // returns a mount that exposes the cloned tree to the sandbox.
+//
+// Unlike prepareGitMount (which copies a host repo and must re-sync remotes
+// from the source so the sandbox sees the same origin/upstream), the URL
+// path delegates to "git clone <url>", which already configures origin
+// pointing at rawURL. No additional remote sync is needed.
 func prepareGitMountFromURL(rawURL string, cloneFn func(src, dst string) error, branch, newBranch string) (gitMountInfo, func(), error) {
 	name, err := repoNameFromURL(rawURL)
 	if err != nil {
