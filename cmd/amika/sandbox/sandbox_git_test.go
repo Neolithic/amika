@@ -550,6 +550,20 @@ func TestResolveRepoIdentity(t *testing.T) {
 		}
 	})
 
+	t.Run("auto-detect + --no-clean uses repo", func(t *testing.T) {
+		repo := makeRepo(t, "myrepo")
+		got, err := resolveRepoIdentity(repo, "", false, false, true)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceAutoDetect {
+			t.Fatalf("Source = %v, want autoDetect", got.Source)
+		}
+		if got.Path != repo {
+			t.Fatalf("Path = %q, want %q", got.Path, repo)
+		}
+	})
+
 	t.Run("--no-git in repo returns none", func(t *testing.T) {
 		repo := makeRepo(t, "myrepo")
 		got, err := resolveRepoIdentity(repo, "", false, true, false)
