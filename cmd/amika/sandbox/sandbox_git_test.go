@@ -700,6 +700,10 @@ func TestRepoNameFromURL(t *testing.T) {
 		{url: "https://github.com/", wantErr: true},
 		{url: "https://github.com", wantErr: true},
 		{url: "just-a-name", wantErr: true},
+		{url: "https://example.com/foo/.", wantErr: true},
+		{url: "https://example.com/foo/..", wantErr: true},
+		{url: "https://example.com/foo/..git", wantErr: true},
+		{url: "git@example.com:foo/.", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.url, func(t *testing.T) {

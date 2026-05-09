@@ -519,6 +519,9 @@ func repoNameFromURL(rawURL string) (string, error) {
 	if pathPart == "" {
 		return "", fmt.Errorf("could not extract repo name from %q", rawURL)
 	}
+	if pathPart == "." || pathPart == ".." || strings.ContainsAny(pathPart, "/\\") {
+		return "", fmt.Errorf("invalid repo name %q extracted from %q", pathPart, rawURL)
+	}
 	return pathPart, nil
 }
 
