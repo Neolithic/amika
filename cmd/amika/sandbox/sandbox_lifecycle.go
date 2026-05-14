@@ -202,6 +202,7 @@ var sandboxListCmd = &cobra.Command{
 					CreatedAt: rs.CreatedAt,
 					Location:  "remote",
 					Branch:    rs.Branch,
+					Repos:     repoNamesFromURL(rs.RepoURL),
 				})
 			}
 		}
@@ -212,13 +213,47 @@ var sandboxListCmd = &cobra.Command{
 		}
 
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSTATE\tLOCATION\tPROVIDER\tIMAGE\tBRANCH\tPORTS\tCREATED")
+		fmt.Fprintln(w, "NAME\tSTATE\tLOCATION\tPROVIDER\tIMAGE\tBRANCH\tREPO\tPORTS\tCREATED")
 		for _, sb := range allItems {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", sb.Name, sb.State, sb.Location, sb.Provider, sb.Image, sb.Branch, formatPortBindings(sb.Ports), sb.CreatedAt)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", sb.Name, sb.State, sb.Location, sb.Provider, sb.Image, sb.Branch, formatRepos(sb.Repos), formatPortBindings(sb.Ports), sb.CreatedAt)
 		}
 		w.Flush()
 		return nil
 	},
+}
+
+func formatRepos(repos []string) string {
+	if len(repos) == 0 {
+		return ""
+	}
+	return strings.Join(repos, ",")
+}
+
+func repoNamesFromURL(repoURL string) []string {
+	repoURL = strings.TrimSpace(repoURL)
+	if repoURL == "" {
+		return nil
+	}
+	name := repoBasenameFromURL(repoURL)
+	if name == "" {
+		return nil
+	}
+	return []string{name}
+}
+
+func repoBasenameFromURL(repoURL string) string {
+	p := repoURL
+	if i := strings.LastIndex(p, "://"); i >= 0 {
+		p = p[i+3:]
+	}
+	if i := strings.LastIndex(p, ":"); i >= 0 {
+		// SCP-style or URL with port; take what's after the last colon as path.
+		p = p[i+1:]
+	}
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		p = p[i+1:]
+	}
+	return strings.TrimSuffix(p, ".git")
 }
 
 var sandboxConnectCmd = &cobra.Command{
