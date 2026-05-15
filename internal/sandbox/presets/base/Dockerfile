@@ -42,17 +42,20 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
     && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Default no-op setup script; users can shadow it via --setup-script.
-# This is the user-facing middle hook in the lifecycle:
+# Default no-op user-facing hooks; callers can shadow them via
+# --setup-script / --start-script or by uploading their own.
+# Lifecycle order:
 # 1. /usr/lib/amikad/pre-setup.sh
 # 2. /usr/local/etc/amikad/setup/setup.sh
-# 3. /usr/lib/amikad/post-setup.sh
-# We put setup.sh inside a setup/ directory so a whole setup volume can be
-# mounted there, and we use /usr/local/etc instead of /etc because some
-# sandbox providers ban mounting to /etc.
+# 3. /usr/local/etc/amikad/setup/start.sh
+# 4. /usr/lib/amikad/post-setup.sh
+# We put the user-facing hooks inside a setup/ directory so a whole setup
+# volume can be mounted there, and we use /usr/local/etc instead of /etc
+# because some sandbox providers ban mounting to /etc.
 RUN mkdir -p /usr/local/etc/amikad/setup \
     && printf '#!/bin/bash\nexit 0\n' > /usr/local/etc/amikad/setup/setup.sh \
-    && chmod +x /usr/local/etc/amikad/setup/setup.sh
+    && printf '#!/bin/bash\nexit 0\n' > /usr/local/etc/amikad/setup/start.sh \
+    && chmod +x /usr/local/etc/amikad/setup/setup.sh /usr/local/etc/amikad/setup/start.sh
 
 # amikad is for the daemon; amika is for user-managed Amika files.
 RUN mkdir -p \
