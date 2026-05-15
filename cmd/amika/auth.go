@@ -47,6 +47,38 @@ managers in CI (for example: "vault kv get -field=key … | amika auth login --a
 			return fmt.Errorf("reading stored API key: %w", keyErr)
 		}
 
+		// --api-key-file is local-only by design (it pairs with secret
+		// managers in CI). Sessions don't conflict with stored API
+		// keys — defaultAuthChecker resolves API keys ahead of
+		// sessions — so neither valid nor stale sessions need to gate
+		// this path. Refusing only on existing API-key state keeps
+		// the path reliably non-interactive: no network, no session
+		// validation.
+		if apiKeyFile != "" {
+			if existingKey != nil || keyCorrupt {
+				who := "an API key"
+				if keyCorrupt {
+					who = "an unreadable API key file"
+				}
+				return fmt.Errorf("already have %s stored, run `amika auth logout` first", who)
+			}
+			return loginWithAPIKeyFile(cmd, apiKeyFile)
+		}
+
+		// Device-flow path. If GetValidSession (the same gate commands
+		// use) succeeds, the user is still effectively logged in and
+		// re-authenticating would be wasted work — refuse. If it
+		// fails, the user is stuck: commands say "not logged in" but
+		// the literal "already have a session" message would trap
+		// them behind a mandatory `auth logout`. Treat the session as
+		// absent so login can replace it in-place.
+		if existingSession != nil {
+			if _, refreshErr := auth.GetValidSession(config.WorkOSClientID()); refreshErr != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "Stored session for %s is unusable (%v); replacing.\n", existingSession.Email, refreshErr)
+				existingSession = nil
+			}
+		}
+
 		// A corrupt credential file counts as "something stored" —
 		// point the user at `auth logout`, which tolerates parse errors.
 		if existingSession != nil || existingKey != nil || sessionCorrupt || keyCorrupt {
@@ -62,10 +94,6 @@ managers in CI (for example: "vault kv get -field=key … | amika auth login --a
 				who = "an API key"
 			}
 			return fmt.Errorf("already have %s stored, run `amika auth logout` first", who)
-		}
-
-		if apiKeyFile != "" {
-			return loginWithAPIKeyFile(cmd, apiKeyFile)
 		}
 
 		session, err := auth.DeviceLogin(config.WorkOSClientID())

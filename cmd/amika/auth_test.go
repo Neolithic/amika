@@ -63,6 +63,45 @@ func TestAuthLogin_RefusesWhenAlreadyLoggedIn(t *testing.T) {
 	}
 }
 
+func TestAuthLogin_APIKeyFileIgnoresStoredSession(t *testing.T) {
+	t.Setenv("AMIKA_STATE_DIRECTORY", t.TempDir())
+	t.Setenv("AMIKA_API_KEY", "")
+
+	// A stored session — valid or not — must not block API-key login.
+	// defaultAuthChecker resolves API keys ahead of sessions, so they
+	// never conflict; and this path is documented to stay reliably
+	// non-interactive (no network, no session validation), which is
+	// load-bearing for CI/offline recovery.
+	if err := auth.SaveSession(auth.WorkOSSession{
+		AccessToken: "tok",
+		Email:       "user@example.com",
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	keyPath := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(keyPath, []byte("sk_new\n"), 0600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+
+	out, err := runRootCommand("auth", "login", "--api-key-file", keyPath)
+	if err != nil {
+		t.Fatalf("api-key login should ignore stored session: %v (out=%q)", err, out)
+	}
+	if !strings.Contains(out, "Stored API key") {
+		t.Fatalf("login did not store the new API key: %q", out)
+	}
+
+	loaded, err := auth.LoadAPIKey()
+	if err != nil {
+		t.Fatalf("LoadAPIKey: %v", err)
+	}
+	if loaded == nil || loaded.Key != "sk_new" {
+		t.Fatalf("api key not stored: %+v", loaded)
+	}
+}
+
 func TestAuthLogout_RecoversFromCorruptFiles(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("AMIKA_STATE_DIRECTORY", stateDir)
