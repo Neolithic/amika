@@ -688,10 +688,11 @@ func ExtractRepoNamesFromMounts(mounts []Mount) []string {
 	seen := make(map[string]bool, len(mounts))
 	var out []string
 	for _, m := range mounts {
-		if !strings.HasPrefix(m.Target, prefix) {
+		target := strings.TrimRight(m.Target, "/")
+		if !strings.HasPrefix(target, prefix) {
 			continue
 		}
-		rest := strings.TrimPrefix(m.Target, prefix)
+		rest := strings.TrimPrefix(target, prefix)
 		if rest == "" || strings.Contains(rest, "/") {
 			continue
 		}

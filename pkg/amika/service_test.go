@@ -60,6 +60,13 @@ func TestExtractRepoNamesFromMounts(t *testing.T) {
 			},
 			want: []string{"alpha", "beta"},
 		},
+		{
+			name: "handles trailing slash on direct child mount",
+			mounts: []Mount{
+				{Target: workdir + "/amika/"},
+			},
+			want: []string{"amika"},
+		},
 	}
 
 	for _, tc := range cases {
