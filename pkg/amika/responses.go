@@ -11,6 +11,7 @@ type Sandbox struct {
 	Preset      string
 	Location    string // "local" or "remote"
 	Branch      string
+	Repos       []string
 	Mounts      []Mount
 	Env         []string
 	Ports       []PortBinding

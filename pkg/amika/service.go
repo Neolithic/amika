@@ -176,6 +176,7 @@ func (s *serviceImpl) CreateSandbox(_ context.Context, req CreateSandboxRequest)
 	if err := s.sandboxes.Save(info); err != nil {
 		return Sandbox{}, fmt.Errorf("%w: %v", ErrInternal, err)
 	}
+	publicMounts := toMounts(info.Mounts)
 	return Sandbox{
 		Name:        info.Name,
 		Provider:    info.Provider,
@@ -184,7 +185,8 @@ func (s *serviceImpl) CreateSandbox(_ context.Context, req CreateSandboxRequest)
 		CreatedAt:   info.CreatedAt,
 		Preset:      info.Preset,
 		Branch:      info.Branch,
-		Mounts:      toMounts(info.Mounts),
+		Repos:       ExtractRepoNamesFromMounts(publicMounts),
+		Mounts:      publicMounts,
 		Env:         info.Env,
 		Ports:       toPortBindings(info.Ports),
 		Services:    toPublicServiceInfos(info.Services),
@@ -241,6 +243,7 @@ func (s *serviceImpl) ListSandboxes(context.Context, ListSandboxesRequest) (List
 	}
 	out := make([]Sandbox, 0, len(items))
 	for _, it := range items {
+		publicMounts := toMounts(it.Mounts)
 		out = append(out, Sandbox{
 			Name:        it.Name,
 			Provider:    it.Provider,
@@ -249,7 +252,8 @@ func (s *serviceImpl) ListSandboxes(context.Context, ListSandboxesRequest) (List
 			CreatedAt:   it.CreatedAt,
 			Preset:      it.Preset,
 			Branch:      it.Branch,
-			Mounts:      toMounts(it.Mounts),
+			Repos:       ExtractRepoNamesFromMounts(publicMounts),
+			Mounts:      publicMounts,
 			Env:         it.Env,
 			Ports:       toPortBindings(it.Ports),
 			Services:    toPublicServiceInfos(it.Services),
@@ -672,6 +676,31 @@ func toMounts(in []sandbox.MountBinding) []Mount {
 	out := make([]Mount, 0, len(in))
 	for _, m := range in {
 		out = append(out, Mount{Type: m.Type, Source: m.Source, Volume: m.Volume, Target: m.Target, Mode: m.Mode, SnapshotFrom: m.SnapshotFrom})
+	}
+	return out
+}
+
+// ExtractRepoNamesFromMounts returns the repository names mounted into the
+// sandbox workspace, derived from mount targets that are direct children of
+// the sandbox workspace root.
+func ExtractRepoNamesFromMounts(mounts []Mount) []string {
+	prefix := sandbox.SandboxWorkdir + "/"
+	seen := make(map[string]bool, len(mounts))
+	var out []string
+	for _, m := range mounts {
+		target := strings.TrimRight(m.Target, "/")
+		if !strings.HasPrefix(target, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(target, prefix)
+		if rest == "" || strings.Contains(rest, "/") {
+			continue
+		}
+		if seen[rest] {
+			continue
+		}
+		seen[rest] = true
+		out = append(out, rest)
 	}
 	return out
 }

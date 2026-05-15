@@ -118,7 +118,9 @@ List all tracked sandboxes.
 amika sandbox list
 ```
 
-Output columns: `NAME`, `STATE`, `LOCATION`, `PROVIDER`, `IMAGE`, `BRANCH`, `PORTS`, `CREATED`.
+Output columns: `NAME`, `STATE`, `LOCATION`, `PROVIDER`, `IMAGE`, `BRANCH`, `REPO`, `PORTS`, `CREATED`.
+
+The `REPO` column lists the repositories mounted into the sandbox workspace (`/home/amika/workspace/<repo>`). For remote sandboxes it shows the repository name parsed from the sandbox's `repo_url`.
 
 ### `amika sandbox connect`
 

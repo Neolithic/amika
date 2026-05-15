@@ -88,6 +88,7 @@ func (s *Service) CreateSandbox(_ context.Context, req amika.CreateSandboxReques
 		return amika.Sandbox{}, fmt.Errorf("%w: %v", amika.ErrInternal, err)
 	}
 
+	publicMounts := toPublicMounts(rec.Mounts)
 	return amika.Sandbox{
 		Name:        rec.Name,
 		Provider:    rec.Provider,
@@ -95,7 +96,8 @@ func (s *Service) CreateSandbox(_ context.Context, req amika.CreateSandboxReques
 		Image:       rec.Image,
 		CreatedAt:   rec.CreatedAt,
 		Preset:      rec.Preset,
-		Mounts:      toPublicMounts(rec.Mounts),
+		Repos:       amika.ExtractRepoNamesFromMounts(publicMounts),
+		Mounts:      publicMounts,
 		Env:         rec.Env,
 		Ports:       toPublicPorts(rec.Ports),
 	}, nil
@@ -131,6 +133,7 @@ func (s *Service) ListSandboxes(context.Context, amika.ListSandboxesRequest) (am
 	}
 	items := make([]amika.Sandbox, 0, len(recs))
 	for _, rec := range recs {
+		publicMounts := toPublicMounts(rec.Mounts)
 		items = append(items, amika.Sandbox{
 			Name:        rec.Name,
 			Provider:    rec.Provider,
@@ -138,7 +141,8 @@ func (s *Service) ListSandboxes(context.Context, amika.ListSandboxesRequest) (am
 			Image:       rec.Image,
 			CreatedAt:   rec.CreatedAt,
 			Preset:      rec.Preset,
-			Mounts:      toPublicMounts(rec.Mounts),
+			Repos:       amika.ExtractRepoNamesFromMounts(publicMounts),
+			Mounts:      publicMounts,
 			Env:         rec.Env,
 			Ports:       toPublicPorts(rec.Ports),
 		})

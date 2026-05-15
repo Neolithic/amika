@@ -10,6 +10,80 @@ import (
 	"github.com/gofixpoint/amika/internal/sandbox"
 )
 
+func TestExtractRepoNamesFromMounts(t *testing.T) {
+	workdir := sandbox.SandboxWorkdir
+	cases := []struct {
+		name   string
+		mounts []Mount
+		want   []string
+	}{
+		{
+			name:   "no mounts",
+			mounts: nil,
+			want:   nil,
+		},
+		{
+			name: "git mount under workspace",
+			mounts: []Mount{
+				{Target: workdir + "/amika"},
+			},
+			want: []string{"amika"},
+		},
+		{
+			name: "ignores mounts outside workspace",
+			mounts: []Mount{
+				{Target: "/etc/foo"},
+				{Target: "/usr/local/bin"},
+			},
+			want: nil,
+		},
+		{
+			name: "ignores nested paths inside workspace",
+			mounts: []Mount{
+				{Target: workdir + "/amika/internal"},
+			},
+			want: nil,
+		},
+		{
+			name: "ignores duplicate repo names",
+			mounts: []Mount{
+				{Target: workdir + "/amika"},
+				{Target: workdir + "/amika"},
+			},
+			want: []string{"amika"},
+		},
+		{
+			name: "preserves order across multiple repos",
+			mounts: []Mount{
+				{Target: workdir + "/alpha"},
+				{Target: workdir + "/beta"},
+			},
+			want: []string{"alpha", "beta"},
+		},
+		{
+			name: "handles trailing slash on direct child mount",
+			mounts: []Mount{
+				{Target: workdir + "/amika/"},
+			},
+			want: []string{"amika"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ExtractRepoNamesFromMounts(tc.mounts)
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("got %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 func TestNewService_ReturnsService(t *testing.T) {
 	t.Setenv("AMIKA_STATE_DIRECTORY", t.TempDir())
 	svc := NewService(Options{})
