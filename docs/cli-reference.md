@@ -32,14 +32,21 @@ amika sandbox create --name dev-sandbox \
   --mount ./src:/workspace/src:ro \
   --mount ./out:/workspace/out
 
-# Mount the current git repo (clean clone by default)
-amika sandbox create --name dev-sandbox --git
+# Auto-detect the git repo containing the current working directory
+# (this is the default behavior when no --git/--no-git flag is passed)
+amika sandbox create --name dev-sandbox
 
-# Mount git repo with untracked/uncommitted files included
-amika sandbox create --name dev-sandbox --git --no-clean
+# Mount git repo with untracked/uncommitted files included (local sandboxes only)
+amika sandbox create --name dev-sandbox --no-clean
 
-# Mount git repo containing a specific path
+# Mount git repo at a specific path
 amika sandbox create --name dev-sandbox --git ./src
+
+# Mount a remote git repo by URL (HTTPS or SSH)
+amika sandbox create --name dev-sandbox --git https://github.com/octocat/Hello-World.git
+
+# Skip git auto-detection and create a bare sandbox
+amika sandbox create --name dev-sandbox --no-git
 
 # Use the claude preset image
 amika sandbox create --name claude-box --preset claude
@@ -67,16 +74,16 @@ amika sandbox create --name dev-sandbox --port 8080:8080
 amika sandbox create --name dev-sandbox --port 3000:3000 --port-host-ip 0.0.0.0
 
 # Clone a specific git branch
-amika sandbox create --name dev-sandbox --git --branch develop
+amika sandbox create --name dev-sandbox --branch develop
 
 # Create a new branch from your current branch
-amika sandbox create --git --new-branch feature-x
+amika sandbox create --new-branch feature-x
 
 # Create a new branch starting from a specific existing branch
-amika sandbox create --git --branch main --new-branch bugfix-1
+amika sandbox create --branch main --new-branch bugfix-1
 
 # Inject remote secrets (remote sandboxes only)
-amika sandbox create --name dev-sandbox --git --remote \
+amika sandbox create --name dev-sandbox --remote \
   --secret env:ANTHROPIC_API_KEY=my-claude-key
 ```
 
@@ -90,16 +97,17 @@ amika sandbox create --name dev-sandbox --git --remote \
 | `--preset <name>`       |                      | Use a preset environment, e.g. `coder` or `claude` (mutually exclusive with `--image`). See [presets.md](presets.md)                 |
 | `--mount <spec>`        |                      | Mount a host path (`source:target[:mode]`, mode defaults to `rwcopy`). Repeatable                                                    |
 | `--volume <spec>`       |                      | Mount an existing named volume (`name:target[:mode]`, mode defaults to `rw`). Repeatable                                             |
-| `--git [path]`          |                      | Mount the git repo root (or repo containing `path`) to `/home/amika/workspace/{repo}`. Uses a clean clone by default                 |
-| `--no-clean`            | `false`              | With `--git`, include untracked/uncommitted files instead of a clean clone                                                           |
+| `--git <path\|url>`     |                      | Mount the git repo at `path` or cloned from a URL (HTTPS, SSH) to `/home/amika/workspace/{repo}`. If omitted, auto-detects the repo containing the current working directory. Clean clone by default |
+| `--no-git`              | `false`              | Skip git auto-detection; create a sandbox without mounting any repo                                                                  |
+| `--no-clean`            | `false`              | With a local-path git source, include untracked/uncommitted files instead of a clean clone. Local sandboxes only                     |
 | `--env <KEY=VALUE>`     |                      | Set environment variable. Repeatable                                                                                                 |
 | `--port <spec>`         |                      | Publish a container port (`hostPort:containerPort[/protocol]`, protocol defaults to `tcp`). Repeatable                               |
 | `--port-host-ip <ip>`   | `127.0.0.1`          | Host IP address to bind all published ports to. Use `0.0.0.0` to bind to all interfaces                                              |
 | `--yes`                 | `false`              | Skip mount confirmation prompt                                                                                                       |
 | `--connect`             | `false`              | Connect to the sandbox shell immediately after creation                                                                              |
 | `--setup-script <path>` |                      | Mount a local script to `/usr/local/etc/amikad/setup/setup.sh` (read-only). See [sandbox-configuration.md](sandbox-configuration.md) |
-| `--branch <name>`       |                      | Check out this branch, or create it if it doesn't exist. Used with `--git`                                                           |
-| `--new-branch <name>`  |                      | Create a new branch (errors if it already exists). Starts from `--branch` if set, otherwise from the base branch. Used with `--git`  |
+| `--branch <name>`       |                      | Check out this branch, or create it if it doesn't exist. Requires a git repo (auto-detected or via `--git`)                          |
+| `--new-branch <name>`  |                      | Create a new branch (errors if it already exists). Starts from `--branch` if set, otherwise from the base branch. Requires a git repo (auto-detected or via `--git`)  |
 | `--secret <spec>`       |                      | Inject a remote secret (`env:FOO=SECRET_NAME` or `env:SECRET_NAME`). Repeatable. Requires `--remote`. See [secrets.md](secrets.md)   |
 
 #### Mount modes

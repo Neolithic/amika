@@ -8,16 +8,42 @@ import (
 	"github.com/gofixpoint/amika/test/testutil"
 )
 
-func TestSandboxCreateNoCleanRequiresGit(t *testing.T) {
+func TestSandboxCreateNoCleanRejectsNoGit(t *testing.T) {
 	bin := testutil.BuildAmikaBinary(t)
 
-	cmd := exec.Command(bin, "sandbox", "create", "--name", "contract-sb", "--no-clean", "--yes")
+	cmd := exec.Command(bin, "sandbox", "create", "--name", "contract-sb", "--no-clean", "--no-git", "--yes")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("expected sandbox create to fail, output:\n%s", string(out))
 	}
-	if !strings.Contains(string(out), "--no-clean requires --git") {
-		t.Fatalf("expected --no-clean/--git contract error, got:\n%s", string(out))
+	if !strings.Contains(string(out), "--no-clean and --no-git are mutually exclusive") {
+		t.Fatalf("expected --no-clean/--no-git contract error, got:\n%s", string(out))
+	}
+}
+
+func TestSandboxCreateGitAndNoGitConflict(t *testing.T) {
+	bin := testutil.BuildAmikaBinary(t)
+
+	cmd := exec.Command(bin, "sandbox", "create", "--name", "contract-sb", "--git", "https://example.com/x/y.git", "--no-git", "--yes")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected sandbox create to fail, output:\n%s", string(out))
+	}
+	if !strings.Contains(string(out), "--git and --no-git are mutually exclusive") {
+		t.Fatalf("expected --git/--no-git contract error, got:\n%s", string(out))
+	}
+}
+
+func TestSandboxCreateNoCleanRejectsRemote(t *testing.T) {
+	bin := testutil.BuildAmikaBinary(t)
+
+	cmd := exec.Command(bin, "sandbox", "create", "--name", "contract-sb", "--no-clean", "--remote", "--yes")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected sandbox create to fail, output:\n%s", string(out))
+	}
+	if !strings.Contains(string(out), "--no-clean is only supported for local sandboxes") {
+		t.Fatalf("expected --no-clean/remote contract error, got:\n%s", string(out))
 	}
 }
 

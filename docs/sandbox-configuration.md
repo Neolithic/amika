@@ -54,17 +54,23 @@ The `--git` CLI flag and the `GitRepo` HTTP API field clone a remote or local gi
 
 ### CLI (`--git`)
 
-`--git` clones the local repository containing the current working directory (or a given path). It always sources from a local git repo on the host.
+By default, `amika sandbox create` walks up from the current working directory and uses the first git repo it finds. Pass `--git <path|url>` to override the source, or `--no-git` to skip git entirely.
 
 ```bash
-# Clone the current repo (clean clone)
-amika sandbox create --git
+# Auto-detect the repo containing the current working directory (clean clone)
+amika sandbox create
 
-# Include untracked/uncommitted files
-amika sandbox create --git --no-clean
+# Auto-detect and include untracked/uncommitted files (local sandboxes only)
+amika sandbox create --no-clean
 
-# Clone the repo containing a specific path
+# Use the repo at a specific path
 amika sandbox create --git ./src
+
+# Clone a remote git URL (HTTPS or SSH)
+amika sandbox create --git https://github.com/octocat/Hello-World.git
+
+# Skip auto-detection and create a sandbox without any repo
+amika sandbox create --no-git
 ```
 
 ### HTTP API (`GitRepo`)
@@ -95,7 +101,7 @@ The repository is cloned on the host, copied into a named Docker volume, and mou
 
 ## Per-repo configuration: `.amika/config.toml`
 
-When you use `--git`, Amika looks for a `.amika/config.toml` file at the root of the repository and applies it automatically. This lets you commit sandbox configuration alongside your code so every collaborator gets the same environment without passing extra flags.
+When the sandbox is backed by a git repo (auto-detected from the cwd, `--git <path>`, or `--git <url>`), Amika looks for a `.amika/config.toml` file at the root of the repository and applies it automatically. This lets you commit sandbox configuration alongside your code so every collaborator gets the same environment without passing extra flags.
 
 ### File location
 
@@ -130,11 +136,11 @@ Works exactly like `--setup-script`: the script is bind-mounted read-only at `/u
 
 `--setup-script` always takes priority. When that flag is passed explicitly, `.amika/config.toml` is not consulted for the setup script.
 
-| Flags passed                                  | Source used                       |
-| --------------------------------------------- | --------------------------------- |
-| `--git` only                                  | `.amika/config.toml` (if present) |
-| `--git --setup-script /path/script.sh`        | `--setup-script` flag             |
-| `--setup-script /path/script.sh` (no `--git`) | `--setup-script` flag             |
+| Flags passed                                                | Source used                       |
+| ----------------------------------------------------------- | --------------------------------- |
+| Repo backed (auto-detect or `--git`), no `--setup-script`   | `.amika/config.toml` (if present) |
+| Repo backed plus `--setup-script /path/script.sh`           | `--setup-script` flag             |
+| `--setup-script /path/script.sh` with `--no-git`            | `--setup-script` flag             |
 
 ### Example
 
@@ -148,7 +154,7 @@ my-project/
     setup.sh          # must be executable (chmod +x)
 ```
 
-Running `amika sandbox create --git` from anywhere inside `my-project` will automatically mount `scripts/setup.sh` to `/usr/local/etc/amikad/setup/setup.sh` in the container.
+Running `amika sandbox create` from anywhere inside `my-project` (the repo is auto-detected) will automatically mount `scripts/setup.sh` to `/usr/local/etc/amikad/setup/setup.sh` in the container.
 
 ### `[env]` — Environment variables
 
@@ -169,7 +175,7 @@ Secrets referenced with `{ secret = "name" }` must be pushed to the remote store
 
 `--branch` checks out a branch if it exists, or creates it if it doesn't. `--new-branch` always creates a new branch and errors if it already exists. When both are used, `--branch` is resolved first and `--new-branch` branches off it.
 
-The **base branch** — used when creating a branch that doesn't exist — is your current checked-out branch when `--git` is a local path, or the repo's default branch when it's a URL.
+The **base branch** — used when creating a branch that doesn't exist — is your current checked-out branch when the repo source is a local path (auto-detect or `--git <path>`), or the repo's default branch when the source is a URL.
 
 | Flags | Result |
 | --- | --- |

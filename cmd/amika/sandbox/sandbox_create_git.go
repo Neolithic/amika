@@ -4,6 +4,7 @@ package sandboxcmd
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -107,6 +108,56 @@ func cloneGitRepo(src, dst string) error {
 		return fmt.Errorf("failed to prepare clean git mount from %q: %s", src, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func cloneGitURL(src, dst string) error {
+	cmd := exec.Command("git", "clone", src, dst)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to clone %q: %s", src, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// prepareGitMountFromURL clones a remote URL into a temporary directory and
+// returns a mount that exposes the cloned tree to the sandbox.
+//
+// Unlike prepareGitMount (which copies a host repo and must re-sync remotes
+// from the source so the sandbox sees the same origin/upstream), the URL
+// path delegates to "git clone <url>", which already configures origin
+// pointing at rawURL. No additional remote sync is needed.
+func prepareGitMountFromURL(rawURL string, cloneFn func(src, dst string) error, branch, newBranch string) (gitMountInfo, func(), error) {
+	name, err := repoNameFromURL(rawURL)
+	if err != nil {
+		return gitMountInfo{}, func() {}, err
+	}
+	target := path.Join(sandbox.SandboxWorkdir, name)
+	tmpDir, err := os.MkdirTemp("", "amika-git-mount-*")
+	if err != nil {
+		return gitMountInfo{}, func() {}, fmt.Errorf("failed to create temp directory for git mount: %w", err)
+	}
+	preparedRepo := filepath.Join(tmpDir, name)
+	if err := cloneFn(rawURL, preparedRepo); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return gitMountInfo{}, func() {}, err
+	}
+	if err := applyBranchCheckout(preparedRepo, branch, newBranch); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return gitMountInfo{}, func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(tmpDir) }
+	return gitMountInfo{
+		RepoName: name,
+		RepoRoot: rawURL,
+		NoClean:  false,
+		Mount: sandbox.MountBinding{
+			Type:         "bind",
+			Source:       preparedRepo,
+			Target:       target,
+			Mode:         "rwcopy",
+			SnapshotFrom: rawURL,
+		},
+	}, cleanup, nil
 }
 
 func branchOrRemoteExists(repoDir, branch string) bool {
@@ -372,6 +423,113 @@ func runGitOutput(repo string, args ...string) (string, error) {
 	return string(out), nil
 }
 
+type repoSource int
+
+const (
+	repoSourceNone repoSource = iota
+	repoSourceAutoDetect
+	repoSourceFlagPath
+	repoSourceFlagURL
+)
+
+type repoIdentity struct {
+	Name   string
+	Source repoSource
+	Path   string
+	URL    string
+}
+
+// resolveRepoIdentity decides which git repo (if any) should back a sandbox
+// based on the user's flag input and the working directory.
+//
+//   - --git and --no-git are mutually exclusive.
+//   - --no-clean and --no-git are mutually exclusive.
+//   - --no-clean is only meaningful when a local-path repo is sourced
+//     (auto-detect or --git <path>).
+//   - When neither --git nor --no-git is set, the function walks up from cwd
+//     to detect a repo; if none is found, identity is repoSourceNone.
+func resolveRepoIdentity(cwd, gitFlag string, gitFlagSet, noGit, noClean bool) (repoIdentity, error) {
+	if gitFlagSet && noGit {
+		return repoIdentity{}, fmt.Errorf("--git and --no-git are mutually exclusive")
+	}
+	if noClean && noGit {
+		return repoIdentity{}, fmt.Errorf("--no-clean and --no-git are mutually exclusive")
+	}
+	if noGit {
+		return repoIdentity{Source: repoSourceNone}, nil
+	}
+	if gitFlagSet {
+		v := strings.TrimSpace(gitFlag)
+		if v == "" {
+			return repoIdentity{}, fmt.Errorf("--git requires a non-empty value")
+		}
+		if isNetworkRemoteURL(v) {
+			if noClean {
+				return repoIdentity{}, fmt.Errorf("--no-clean cannot be used with a git URL")
+			}
+			name, err := repoNameFromURL(v)
+			if err != nil {
+				return repoIdentity{}, err
+			}
+			return repoIdentity{Name: name, Source: repoSourceFlagURL, URL: v}, nil
+		}
+		repoRoot, err := resolveGitRoot(v)
+		if err != nil {
+			return repoIdentity{}, fmt.Errorf("could not find git repo at %q: %w", v, err)
+		}
+		return repoIdentity{Name: filepath.Base(repoRoot), Source: repoSourceFlagPath, Path: repoRoot}, nil
+	}
+	repoRoot, err := resolveGitRoot(cwd)
+	if err != nil {
+		if noClean {
+			return repoIdentity{}, fmt.Errorf("--no-clean requires a git repo, but none was detected from %q", cwd)
+		}
+		return repoIdentity{Source: repoSourceNone}, nil
+	}
+	return repoIdentity{Name: filepath.Base(repoRoot), Source: repoSourceAutoDetect, Path: repoRoot}, nil
+}
+
+// repoNameFromURL extracts the repo name from a git URL.
+// Examples:
+//
+//	https://github.com/foo/bar       -> bar
+//	https://github.com/foo/bar.git   -> bar
+//	git@github.com:foo/bar.git       -> bar
+//	ssh://git@github.com/foo/bar.git -> bar
+func repoNameFromURL(rawURL string) (string, error) {
+	s := strings.TrimSpace(rawURL)
+	if s == "" {
+		return "", fmt.Errorf("empty git URL")
+	}
+	var pathPart string
+	if strings.Contains(s, "://") {
+		u, err := url.Parse(s)
+		if err != nil {
+			return "", fmt.Errorf("parsing git URL %q: %w", rawURL, err)
+		}
+		pathPart = u.Path
+	} else if i := strings.Index(s, ":"); i >= 0 {
+		pathPart = s[i+1:]
+	} else {
+		return "", fmt.Errorf("not a git URL: %q", rawURL)
+	}
+	pathPart = strings.TrimSuffix(strings.TrimSpace(pathPart), "/")
+	if pathPart == "" {
+		return "", fmt.Errorf("git URL %q has no repo path", rawURL)
+	}
+	if i := strings.LastIndex(pathPart, "/"); i >= 0 {
+		pathPart = pathPart[i+1:]
+	}
+	pathPart = strings.TrimSuffix(pathPart, ".git")
+	if pathPart == "" {
+		return "", fmt.Errorf("could not extract repo name from %q", rawURL)
+	}
+	if pathPart == "." || pathPart == ".." || strings.ContainsAny(pathPart, "/\\") {
+		return "", fmt.Errorf("invalid repo name %q extracted from %q", pathPart, rawURL)
+	}
+	return pathPart, nil
+}
+
 func resolveGitURL(value string) (string, error) {
 	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") || strings.HasPrefix(value, "git@") {
 		return value, nil
@@ -387,10 +545,10 @@ func resolveGitURL(value string) (string, error) {
 	}
 	origin, ok := remotes["origin"]
 	if !ok {
-		return "", fmt.Errorf("no origin remote found in %q; specify a git HTTP(S) or SSH URL directly with --git <url>", repoRoot)
+		return "", fmt.Errorf("no origin remote found in %q; specify a git HTTP(S) or SSH URL directly with --git <url>, or pass --no-git to create a sandbox without a repo", repoRoot)
 	}
 	if !isNetworkRemoteURL(origin) {
-		return "", fmt.Errorf("origin remote %q is a local path; specify a git HTTP(S) or SSH URL directly with --git <url>", origin)
+		return "", fmt.Errorf("origin remote %q is a local path; specify a git HTTP(S) or SSH URL directly with --git <url>, or pass --no-git to create a sandbox without a repo", origin)
 	}
 	return origin, nil
 }

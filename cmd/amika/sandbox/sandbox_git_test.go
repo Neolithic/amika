@@ -287,6 +287,87 @@ func TestPrepareGitMount_CleanClone_BranchAndNewBranchCreatesBase(t *testing.T) 
 	}
 }
 
+func TestPrepareGitMountFromURL(t *testing.T) {
+	source := createGitRepo(t, nil)
+	fakeURL := "https://example.com/foo/myrepo.git"
+
+	var seenSrc, seenDst string
+	cloneFn := func(src, dst string) error {
+		seenSrc = src
+		seenDst = dst
+		cmd := exec.Command("git", "clone", "--local", "--no-hardlinks", source, dst)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("clone failed: %s", out)
+		}
+		return nil
+	}
+
+	info, cleanup, err := prepareGitMountFromURL(fakeURL, cloneFn, "", "")
+	if err != nil {
+		t.Fatalf("prepareGitMountFromURL failed: %v", err)
+	}
+	defer cleanup()
+
+	if seenSrc != fakeURL {
+		t.Fatalf("cloneFn src = %q, want %q", seenSrc, fakeURL)
+	}
+	if seenDst != info.Mount.Source {
+		t.Fatalf("cloneFn dst = %q, want %q", seenDst, info.Mount.Source)
+	}
+	if info.RepoName != "myrepo" {
+		t.Fatalf("RepoName = %q, want %q", info.RepoName, "myrepo")
+	}
+	if info.RepoRoot != fakeURL {
+		t.Fatalf("RepoRoot = %q, want %q", info.RepoRoot, fakeURL)
+	}
+	wantTarget := "/home/amika/workspace/myrepo"
+	if info.Mount.Target != wantTarget {
+		t.Fatalf("Mount.Target = %q, want %q", info.Mount.Target, wantTarget)
+	}
+	if info.Mount.Mode != "rwcopy" {
+		t.Fatalf("Mount.Mode = %q, want rwcopy", info.Mount.Mode)
+	}
+	if info.Mount.SnapshotFrom != fakeURL {
+		t.Fatalf("Mount.SnapshotFrom = %q, want %q", info.Mount.SnapshotFrom, fakeURL)
+	}
+	if _, err := os.Stat(filepath.Join(info.Mount.Source, "README.md")); err != nil {
+		t.Fatalf("expected README.md in cloned repo: %v", err)
+	}
+
+	tmpDir := filepath.Dir(info.Mount.Source)
+	cleanup()
+	if _, err := os.Stat(tmpDir); !os.IsNotExist(err) {
+		t.Fatalf("expected temp git clone directory to be removed, err=%v", err)
+	}
+}
+
+func TestPrepareGitMountFromURL_BadURL(t *testing.T) {
+	cloneFn := func(_, _ string) error {
+		t.Fatal("cloneFn should not be called for a bad URL")
+		return nil
+	}
+	if _, _, err := prepareGitMountFromURL("", cloneFn, "", ""); err == nil {
+		t.Fatal("expected error for empty URL")
+	}
+	if _, _, err := prepareGitMountFromURL("https://github.com/", cloneFn, "", ""); err == nil {
+		t.Fatal("expected error for URL without path")
+	}
+}
+
+func TestPrepareGitMountFromURL_CloneFails(t *testing.T) {
+	cloneFn := func(_, _ string) error {
+		return fmt.Errorf("simulated clone failure")
+	}
+	_, _, err := prepareGitMountFromURL("https://example.com/foo/bar.git", cloneFn, "", "")
+	if err == nil {
+		t.Fatal("expected clone failure to surface")
+	}
+	if !strings.Contains(err.Error(), "simulated clone failure") {
+		t.Fatalf("error = %v, want it to mention the clone failure", err)
+	}
+}
+
 func TestConfigReadFromPreparedRepo(t *testing.T) {
 	root := createGitRepo(t, map[string]string{
 		"origin": "https://github.com/example/upstream.git",
@@ -423,6 +504,237 @@ func TestIsNetworkRemoteURL(t *testing.T) {
 		if got := isNetworkRemoteURL(tt.url); got != tt.want {
 			t.Fatalf("isNetworkRemoteURL(%q) = %v, want %v", tt.url, got, tt.want)
 		}
+	}
+}
+
+func TestResolveRepoIdentity(t *testing.T) {
+	makeRepo := func(t *testing.T, name string) string {
+		t.Helper()
+		root := t.TempDir()
+		repo := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+			t.Fatalf("failed to create fake repo: %v", err)
+		}
+		return repo
+	}
+
+	t.Run("auto-detect from in-repo cwd", func(t *testing.T) {
+		repo := makeRepo(t, "myrepo")
+		nested := filepath.Join(repo, "sub", "dir")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		got, err := resolveRepoIdentity(nested, "", false, false, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceAutoDetect {
+			t.Fatalf("Source = %v, want autoDetect", got.Source)
+		}
+		if got.Name != "myrepo" {
+			t.Fatalf("Name = %q, want %q", got.Name, "myrepo")
+		}
+		if got.Path != repo {
+			t.Fatalf("Path = %q, want %q", got.Path, repo)
+		}
+	})
+
+	t.Run("auto-detect outside repo returns none", func(t *testing.T) {
+		dir := t.TempDir()
+		got, err := resolveRepoIdentity(dir, "", false, false, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceNone {
+			t.Fatalf("Source = %v, want none", got.Source)
+		}
+	})
+
+	t.Run("auto-detect + --no-clean uses repo", func(t *testing.T) {
+		repo := makeRepo(t, "myrepo")
+		got, err := resolveRepoIdentity(repo, "", false, false, true)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceAutoDetect {
+			t.Fatalf("Source = %v, want autoDetect", got.Source)
+		}
+		if got.Path != repo {
+			t.Fatalf("Path = %q, want %q", got.Path, repo)
+		}
+	})
+
+	t.Run("--no-git in repo returns none", func(t *testing.T) {
+		repo := makeRepo(t, "myrepo")
+		got, err := resolveRepoIdentity(repo, "", false, true, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceNone {
+			t.Fatalf("Source = %v, want none", got.Source)
+		}
+	})
+
+	t.Run("--git <path>", func(t *testing.T) {
+		repo := makeRepo(t, "fromflag")
+		got, err := resolveRepoIdentity("/tmp", repo, true, false, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceFlagPath {
+			t.Fatalf("Source = %v, want flagPath", got.Source)
+		}
+		if got.Name != "fromflag" {
+			t.Fatalf("Name = %q, want %q", got.Name, "fromflag")
+		}
+	})
+
+	t.Run("--git <https url>", func(t *testing.T) {
+		got, err := resolveRepoIdentity("/tmp", "https://github.com/foo/bar.git", true, false, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceFlagURL {
+			t.Fatalf("Source = %v, want flagURL", got.Source)
+		}
+		if got.Name != "bar" {
+			t.Fatalf("Name = %q, want %q", got.Name, "bar")
+		}
+		if got.URL != "https://github.com/foo/bar.git" {
+			t.Fatalf("URL = %q", got.URL)
+		}
+	})
+
+	t.Run("--git <ssh url>", func(t *testing.T) {
+		got, err := resolveRepoIdentity("/tmp", "git@github.com:foo/baz.git", true, false, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Source != repoSourceFlagURL {
+			t.Fatalf("Source = %v, want flagURL", got.Source)
+		}
+		if got.Name != "baz" {
+			t.Fatalf("Name = %q, want %q", got.Name, "baz")
+		}
+	})
+
+	t.Run("--git + --no-git is an error", func(t *testing.T) {
+		if _, err := resolveRepoIdentity("/tmp", "https://x/y.git", true, true, false); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("--no-clean + --no-git is an error", func(t *testing.T) {
+		if _, err := resolveRepoIdentity("/tmp", "", false, true, true); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("--no-clean + --git <url> is an error", func(t *testing.T) {
+		if _, err := resolveRepoIdentity("/tmp", "https://x/y.git", true, false, true); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("--no-clean without a repo is an error", func(t *testing.T) {
+		dir := t.TempDir()
+		if _, err := resolveRepoIdentity(dir, "", false, false, true); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("--git with empty value is an error", func(t *testing.T) {
+		if _, err := resolveRepoIdentity("/tmp", "  ", true, false, false); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("--git <bad path> is an error", func(t *testing.T) {
+		bogus := filepath.Join(t.TempDir(), "no-such-dir")
+		if _, err := resolveRepoIdentity("/tmp", bogus, true, false, false); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestFormatRepoBanner(t *testing.T) {
+	tests := []struct {
+		name     string
+		identity repoIdentity
+		want     string
+	}{
+		{
+			name:     "none",
+			identity: repoIdentity{Source: repoSourceNone},
+			want:     "Creating a bare sandbox with no repos.",
+		},
+		{
+			name:     "auto-detect",
+			identity: repoIdentity{Source: repoSourceAutoDetect, Name: "myrepo"},
+			want:     "Creating sandbox with repo myrepo.",
+		},
+		{
+			name:     "flag-path",
+			identity: repoIdentity{Source: repoSourceFlagPath, Name: "frompath"},
+			want:     "Creating sandbox with repo frompath.",
+		},
+		{
+			name:     "flag-url",
+			identity: repoIdentity{Source: repoSourceFlagURL, Name: "fromurl"},
+			want:     "Creating sandbox with repo fromurl.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatRepoBanner(tt.identity); got != tt.want {
+				t.Fatalf("formatRepoBanner = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepoNameFromURL(t *testing.T) {
+	tests := []struct {
+		url     string
+		want    string
+		wantErr bool
+	}{
+		{url: "https://github.com/foo/bar", want: "bar"},
+		{url: "https://github.com/foo/bar.git", want: "bar"},
+		{url: "https://github.com/foo/bar/", want: "bar"},
+		{url: "http://example.com/foo/bar.git", want: "bar"},
+		{url: "git@github.com:foo/bar.git", want: "bar"},
+		{url: "git@github.com:foo/bar", want: "bar"},
+		{url: "ssh://git@github.com/foo/bar.git", want: "bar"},
+		{url: "ssh://git@github.com:22/foo/bar.git", want: "bar"},
+		{url: "https://gitlab.com/group/subgroup/repo.git", want: "repo"},
+		{url: "  https://github.com/foo/bar.git  ", want: "bar"},
+		{url: "", wantErr: true},
+		{url: "   ", wantErr: true},
+		{url: "https://github.com/", wantErr: true},
+		{url: "https://github.com", wantErr: true},
+		{url: "just-a-name", wantErr: true},
+		{url: "https://example.com/foo/.", wantErr: true},
+		{url: "https://example.com/foo/..", wantErr: true},
+		{url: "https://example.com/foo/..git", wantErr: true},
+		{url: "git@example.com:foo/.", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			got, err := repoNameFromURL(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("repoNameFromURL(%q) = %q, want error", tt.url, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("repoNameFromURL(%q) unexpected error: %v", tt.url, err)
+			}
+			if got != tt.want {
+				t.Fatalf("repoNameFromURL(%q) = %q, want %q", tt.url, got, tt.want)
+			}
+		})
 	}
 }
 

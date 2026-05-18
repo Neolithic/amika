@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/gofixpoint/amika/internal/apiclient"
@@ -26,13 +25,22 @@ var sandboxCreateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		noClean, _ := cmd.Flags().GetBool("no-clean")
 		noSetup, _ := cmd.Flags().GetBool("no-setup")
-		gitFlagChanged := cmd.Flags().Changed("git")
-		if err := validateGitFlags(gitFlagChanged, noClean); err != nil {
-			return err
-		}
+		gitFlag, _ := cmd.Flags().GetString("git")
+		gitFlagSet := cmd.Flags().Changed("git")
+		noGit, _ := cmd.Flags().GetBool("no-git")
 		if noSetup && cmd.Flags().Changed("setup-script") {
 			return fmt.Errorf("--no-setup and --setup-script are mutually exclusive")
 		}
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to determine working directory: %w", err)
+		}
+		identity, err := resolveRepoIdentity(cwd, gitFlag, gitFlagSet, noGit, noClean)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), formatRepoBanner(identity))
 
 		target, err := getRemoteTarget(cmd)
 		if err != nil {
@@ -40,11 +48,14 @@ var sandboxCreateCmd = &cobra.Command{
 		}
 
 		mode := runmode.Resolve(cmd)
+		if mode == runmode.Remote && noClean {
+			return fmt.Errorf("--no-clean is only supported for local sandboxes")
+		}
 		if err := runmode.RequireAuth(mode, defaultAuthChecker); err != nil {
 			return err
 		}
 		if mode == runmode.Remote {
-			return createRemoteSandbox(cmd, target)
+			return createRemoteSandbox(cmd, target, identity)
 		}
 
 		if secretFlags, _ := cmd.Flags().GetStringArray("secret"); len(secretFlags) > 0 {
@@ -57,7 +68,6 @@ var sandboxCreateCmd = &cobra.Command{
 		preset, _ := cmd.Flags().GetString("preset")
 		mountStrs, _ := cmd.Flags().GetStringArray("mount")
 		volumeStrs, _ := cmd.Flags().GetStringArray("volume")
-		gitPath, _ := cmd.Flags().GetString("git")
 		envStrs, _ := cmd.Flags().GetStringArray("env")
 		portStrs, _ := cmd.Flags().GetStringArray("port")
 		portHostIP, _ := cmd.Flags().GetString("port-host-ip")
@@ -83,7 +93,7 @@ var sandboxCreateCmd = &cobra.Command{
 		branchFlag, _ := cmd.Flags().GetString("branch")
 		newBranchFlag, _ := cmd.Flags().GetString("new-branch")
 		collected, err := collectMounts(mountStrs, volumeStrs, portStrs, portHostIP,
-			gitPath, gitFlagChanged, noClean,
+			identity, noClean,
 			setupScript, cmd.Flags().Changed("setup-script"),
 			noSetup,
 			branchFlag, newBranchFlag)
@@ -262,9 +272,8 @@ var sandboxCreateCmd = &cobra.Command{
 	},
 }
 
-func createRemoteSandbox(cmd *cobra.Command, target string) error {
+func createRemoteSandbox(cmd *cobra.Command, target string, identity repoIdentity) error {
 	name, _ := cmd.Flags().GetString("name")
-	gitValue, _ := cmd.Flags().GetString("git")
 	secretFlags, _ := cmd.Flags().GetStringArray("secret")
 	envFlags, _ := cmd.Flags().GetStringArray("env")
 	preset, _ := cmd.Flags().GetString("preset")
@@ -284,37 +293,35 @@ func createRemoteSandbox(cmd *cobra.Command, target string) error {
 	}
 
 	var gitURL string
-	gitValueIsLocalPath := false
-	if cmd.Flags().Changed("git") {
-		if !strings.HasPrefix(gitValue, "http://") && !strings.HasPrefix(gitValue, "https://") && !strings.HasPrefix(gitValue, "git@") {
-			gitValueIsLocalPath = true
-		}
-		resolved, err := resolveGitURL(gitValue)
+	gitIsLocalPath := identity.Source == repoSourceAutoDetect || identity.Source == repoSourceFlagPath
+	switch identity.Source {
+	case repoSourceFlagURL:
+		gitURL = identity.URL
+	case repoSourceAutoDetect, repoSourceFlagPath:
+		resolved, err := resolveGitURL(identity.Path)
 		if err != nil {
 			return err
 		}
 		gitURL = resolved
 	}
 
-	if branch == "" && newBranch == "" && gitValueIsLocalPath {
-		if hostBranch, err := detectHostCurrentBranch(gitValue); err == nil {
+	if branch == "" && newBranch == "" && gitIsLocalPath {
+		if hostBranch, err := detectHostCurrentBranch(identity.Path); err == nil {
 			branch = hostBranch
 		}
 	}
 
 	// Warn if the auto-detected branch hasn't been pushed to the remote
 	// or has local commits that the remote doesn't have yet.
-	if branch != "" && newBranch == "" && gitValueIsLocalPath && !cmd.Flags().Changed("branch") {
-		if repoRoot, err := resolveGitRoot(gitValue); err == nil {
-			if !isLocalBranchReachableFromRemote(repoRoot, branch) {
-				return fmt.Errorf(
-					"current branch %q has not been pushed or is not up-to-date with the remote\n\n"+
-						"The sandbox will either start from an older version of this branch or\n"+
-						"create it fresh from the default branch.\n\n"+
-						"Push your branch first, or use --branch to specify your branch explicitly.",
-					branch,
-				)
-			}
+	if branch != "" && newBranch == "" && gitIsLocalPath && !cmd.Flags().Changed("branch") {
+		if !isLocalBranchReachableFromRemote(identity.Path, branch) {
+			return fmt.Errorf(
+				"current branch %q has not been pushed or is not up-to-date with the remote\n\n"+
+					"The sandbox will either start from an older version of this branch or\n"+
+					"create it fresh from the default branch.\n\n"+
+					"Push your branch first, or use --branch to specify your branch explicitly.",
+				branch,
+			)
 		}
 	}
 

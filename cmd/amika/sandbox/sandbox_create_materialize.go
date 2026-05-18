@@ -88,8 +88,7 @@ type collectedMounts struct {
 func collectMounts(
 	mountStrs, volumeStrs, portStrs []string,
 	portHostIP string,
-	gitPath string,
-	gitFlagChanged bool,
+	identity repoIdentity,
 	noClean bool,
 	setupScript string,
 	setupScriptFlagChanged bool,
@@ -112,8 +111,17 @@ func collectMounts(
 
 	cleanup := func() {}
 	var gmi *gitMountInfo
-	if gitFlagChanged {
-		info, cleanupGitMount, err := prepareGitMount(gitPath, noClean, cloneGitRepo, branch, newBranch)
+	switch identity.Source {
+	case repoSourceAutoDetect, repoSourceFlagPath:
+		info, cleanupGitMount, err := prepareGitMount(identity.Path, noClean, cloneGitRepo, branch, newBranch)
+		if err != nil {
+			return collectedMounts{}, err
+		}
+		cleanup = cleanupGitMount
+		gmi = &info
+		mounts = append(mounts, info.Mount)
+	case repoSourceFlagURL:
+		info, cleanupGitMount, err := prepareGitMountFromURL(identity.URL, cloneGitURL, branch, newBranch)
 		if err != nil {
 			return collectedMounts{}, err
 		}

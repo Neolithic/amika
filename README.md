@@ -23,7 +23,7 @@
 
 Amika is an open-source CLI and HTTP API for running AI coding agents in sandboxes. Each sandbox comes pre-configured with development tools and agent CLIs — Claude Code, Codex, and OpenCode — ready to go out of the box.
 
-Agent credentials are auto-discovered from your host machine and mounted into every sandbox. Git repos are cloned in with `--git`, and setup scripts let you customize the environment on creation. The REST API (`amika-server`) exposes the same functionality for programmatic access.
+Agent credentials are auto-discovered from your host machine and mounted into every sandbox. Git repos are auto-detected from the current directory (or pointed to with `--git <path|url>`), and setup scripts let you customize the environment on creation. The REST API (`amika-server`) exposes the same functionality for programmatic access.
 
 This is the same infra pattern used by Ramp, Coinbase, and Stripe for their in-house coding agent platforms.
 
@@ -31,7 +31,7 @@ This is the same infra pattern used by Ramp, Coinbase, and Stripe for their in-h
 
 - **Preset environments** — Ubuntu 24.04 sandboxes with Claude Code, Codex, OpenCode, Python, Node.js, and standard dev tools
 - **Credential auto-discovery** — Zero-config agent auth; your Claude Code and Codex API keys and OAuth tokens are found and mounted automatically
-- **Git repo mounting** — Clone your repo into a sandbox with `--git` (clean clone by default, or `--no-clean` for uncommitted files)
+- **Git repo mounting** — Auto-detects the git repo containing your current directory (or pass `--git <path|url>`). Clean clone by default; `--no-clean` includes uncommitted files
 - **Setup scripts** — Run custom initialization logic on sandbox creation with `--setup-script`
 - **Port publishing** — Expose container ports to the host for live previews with `--port`
 - **REST API** — `amika-server` exposes all operations as HTTP endpoints with OpenAPI docs at `/docs`
@@ -49,10 +49,10 @@ make build
 
 ### Create Your First Sandbox
 
-Run this from within a git repo, and the `--git` flag will pick up the repo root and mount the entire repo into your sandbox.
+Run this from within a git repo and Amika will auto-detect the repo root and mount the entire repo into your sandbox.
 
 ```bash
-./dist/amika sandbox create --name my-sandbox --git --connect
+./dist/amika sandbox create --name my-sandbox --connect
 ```
 
 Inside the sandbox you get a zsh shell at `/home/amika/workspace/{repo}` with your full repo, dev tools, and agent credentials ready.
@@ -62,7 +62,7 @@ Inside the sandbox you get a zsh shell at `/home/amika/workspace/{repo}` with yo
 Create a sandbox with your git repo and auto-connect to it:
 
 ```bash
-./dist/amika sandbox create --git --connect
+./dist/amika sandbox create --connect
 # Inside the sandbox:
 claude "Add unit tests for the auth module"
 ```
@@ -70,8 +70,8 @@ claude "Add unit tests for the auth module"
 ### Run Multiple Agents in Parallel
 
 ```bash
-./dist/amika sandbox create --name task-1 --git
-./dist/amika sandbox create --name task-2 --git
+./dist/amika sandbox create --name task-1
+./dist/amika sandbox create --name task-2
 ./dist/amika sandbox list
 ```
 
@@ -137,7 +137,7 @@ Agent credentials are auto-discovered from your host and mounted as read-only sn
 
 - [x] Docker-backed persistent sandboxes
 - [x] Credential auto-discovery and mounting
-- [x] Git repo mounting (`--git`)
+- [x] Git repo mounting (auto-detect or `--git <path|url>`)
 - [x] Setup scripts (`--setup-script`)
 - [x] Port publishing (`--port`)
 - [x] REST API with OpenAPI docs

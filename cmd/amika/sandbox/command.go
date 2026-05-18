@@ -40,9 +40,9 @@ func New() *cobra.Command {
 	sandboxCreateCmd.Flags().StringArray("volume", nil, "Mount an existing named volume (name:target[:mode], mode defaults to rw)")
 	sandboxCreateCmd.Flags().StringArray("port", nil, "Publish a container port (hostPort:containerPort[/protocol], protocol defaults to tcp)")
 	sandboxCreateCmd.Flags().String("port-host-ip", "127.0.0.1", "Host IP address to bind published ports")
-	sandboxCreateCmd.Flags().String("git", "", "Mount the current git repo root (or repo containing PATH) into /home/amika/workspace/{repo}")
-	sandboxCreateCmd.Flags().Lookup("git").NoOptDefVal = "."
-	sandboxCreateCmd.Flags().Bool("no-clean", false, "With --git, include untracked files from working tree instead of a clean clone")
+	sandboxCreateCmd.Flags().String("git", "", "Mount a git repo into the sandbox. Accepts a local path or a git URL (HTTPS, SSH). If omitted and the cwd is in a git repo, that repo is used automatically.")
+	sandboxCreateCmd.Flags().Bool("no-git", false, "Skip git repo auto-detection; create a sandbox without mounting any repo.")
+	sandboxCreateCmd.Flags().Bool("no-clean", false, "With a local-path git source, include untracked files from the working tree instead of a clean clone. Local sandboxes only.")
 	sandboxCreateCmd.Flags().String("size", "", "Sandbox size: \"xs\" or \"m\" (default \"m\", remote only)")
 	sandboxCreateCmd.Flags().StringArray("env", nil, "Set environment variable (KEY=VALUE)")
 	sandboxCreateCmd.Flags().StringArray("secret", nil, "Inject a remote secret (env:FOO=SECRET_NAME or env:SECRET_NAME)")
