@@ -5,8 +5,13 @@ FROM ${DIND_IMAGE}
 
 USER root
 
-# Install coding agent CLIs.
-RUN npm install -g pnpm typescript tsx @anthropic-ai/claude-code @openai/codex opencode-ai
+# Install coding agent CLIs. Some packages' postinstall scripts write into
+# /home/amika (e.g. creating /home/amika/.config) while running as root,
+# which leaves those paths root-owned and breaks user-facing hooks that try
+# to write under ~/.config. Reset ownership before switching users so the
+# image is consistent regardless of postinstall behavior.
+RUN npm install -g pnpm typescript tsx @anthropic-ai/claude-code @openai/codex opencode-ai \
+    && chown -R amika:amika /home/amika
 
 USER amika
 
