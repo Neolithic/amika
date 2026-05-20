@@ -16,7 +16,7 @@ const DefaultCoderImage = "amika/coder:latest"
 var AllowedPresets = []string{"coder", "coder-dind"}
 
 // AllowedSizes lists the size names available for user selection via --size.
-var AllowedSizes = []string{"xs", "m"}
+var AllowedSizes = []string{"xs", "m", "l", "xl"}
 
 // ValidatePreset returns an error if preset is non-empty and not in AllowedPresets.
 func ValidatePreset(preset string) error {
