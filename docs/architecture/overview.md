@@ -34,50 +34,53 @@ See [cli-reference.md](../cli-reference.md) for full flag documentation.
 
 ## Package Layout
 
+All Go sources live under `go/` (Go module `github.com/gofixpoint/amika/go`).
+
 ```
-cmd/amika/
-  main.go              CLI entry point, root Cobra command
-  sandbox.go           sandbox create/list/connect/delete commands
-  materialize.go       Docker-based materialize command
-  volume.go            volume list/delete commands
-  auth.go              auth extract command
-cmd/amika-server/
-  main.go              HTTP server entry point (REST API)
+go/
+  cmd/amika/
+    main.go              CLI entry point, root Cobra command
+    sandbox.go           sandbox create/list/connect/delete commands
+    materialize.go       Docker-based materialize command
+    volume.go            volume list/delete commands
+    auth.go              auth extract command
+  cmd/amika-server/
+    main.go              HTTP server entry point (REST API)
 
-internal/
-  sandbox/             Docker sandbox management
-    sandbox.go           Sandbox paths and temp directory creation
-    docker.go            Docker container and volume operations
-    image_resolution.go  Preset image resolution and auto-build
-    names.go             Random sandbox name generation
-    store.go             Sandbox state persistence (JSONL)
-    volume_store.go      Volume state persistence (JSONL)
-    file_mount_store.go  File mount state persistence (JSONL)
-    presets.go           Embeds preset Dockerfiles via go:embed
-    presets/
-      coder/Dockerfile   Coder preset (Claude + Codex + OpenCode)
-      claude/Dockerfile  Claude-only preset
+  internal/
+    sandbox/             Docker sandbox management
+      sandbox.go           Sandbox paths and temp directory creation
+      docker.go            Docker container and volume operations
+      image_resolution.go  Preset image resolution and auto-build
+      names.go             Random sandbox name generation
+      store.go             Sandbox state persistence (JSONL)
+      volume_store.go      Volume state persistence (JSONL)
+      file_mount_store.go  File mount state persistence (JSONL)
+      presets.go           Embeds preset Dockerfiles via go:embed
+      presets/
+        coder/Dockerfile   Coder preset (Claude + Codex + OpenCode)
+        claude/Dockerfile  Claude-only preset
 
-  auth/                Credential discovery
-    auth.go              CredentialSet type, env var rendering
-    discovery.go         Multi-source credential scanning with priority
+    auth/                Credential discovery
+      auth.go              CredentialSet type, env var rendering
+      discovery.go         Multi-source credential scanning with priority
 
-  agentconfig/         Agent credential auto-mounting
-    agentconfig.go       Discovers Claude/Codex/OpenCode config files and
-                         produces MountBindings for containers
+    agentconfig/         Agent credential auto-mounting
+      agentconfig.go       Discovers Claude/Codex/OpenCode config files and
+                           produces MountBindings for containers
 
-  config/              XDG path resolution and state file locations
-  basedir/             XDG base directory resolution
-  httpapi/             HTTP handler for the REST API server
-  app/                 Application service layer implementation
-  ports/               Port interfaces for Docker and store operations
+    config/              XDG path resolution and state file locations
+    basedir/             XDG base directory resolution
+    httpapi/             HTTP handler for the REST API server
+    app/                 Application service layer implementation
+    ports/               Port interfaces for Docker and store operations
 
-  materialize/         Local sandbox script execution (v0)
+    materialize/         Local sandbox script execution (v0)
 
-pkg/amika/             Public service API (used by both CLI and HTTP server)
-  service.go           Service interface and implementation
-  requests.go          Request types
-  responses.go         Response types
+  pkg/amika/             Public service API (used by both CLI and HTTP server)
+    service.go           Service interface and implementation
+    requests.go          Request types
+    responses.go         Response types
 ```
 
 ## System Dependencies

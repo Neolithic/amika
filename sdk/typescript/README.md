@@ -1,6 +1,6 @@
 # @amika/sdk
 
-TypeScript SDK for [Amika](https://github.com/gofixpoint/amika). A 1:1 port of the Go API client at `internal/apiclient`. Same method names, same input/output shapes (camelCased), same HTTP behavior — talks to the cloud API at `https://app.amika.dev/api/v0beta1`.
+TypeScript SDK for [Amika](https://github.com/gofixpoint/amika). A 1:1 port of the Go API client at `go/internal/apiclient`. Same method names, same input/output shapes (camelCased), same HTTP behavior — talks to the cloud API at `https://app.amika.dev/api/v0beta1`.
 
 ## Install
 

@@ -23,9 +23,12 @@ make setup
 make build
 
 # Or build individually
-make build-cli     # go build -o dist/amika ./cmd/amika
-make build-server  # go build -o dist/amika-server ./cmd/amika-server
+make build-cli     # builds dist/amika
+make build-server  # builds dist/amika-server
 ```
+
+Go sources live under `go/`. The Makefile runs go commands with
+`go -C go ...`, so `make` targets work unchanged from the repo root.
 
 The wrapper scripts auto-build and run for convenience during development:
 
@@ -49,15 +52,15 @@ make ci
 
 # Individual targets
 make build         # builds both dist/amika and dist/amika-server
-make build-cli     # go build -o dist/amika ./cmd/amika
-make build-server  # go build -o dist/amika-server ./cmd/amika-server
-make test    # go test ./...
-make vet     # go vet ./...
+make build-cli     # builds dist/amika
+make build-server  # builds dist/amika-server
+make test    # go test ./... (run from go/)
+make vet     # go vet ./...  (run from go/)
 make fmt     # check formatting
 make lint    # run revive linter
 ```
 
-Linting uses [revive](https://github.com/mgechev/revive) with config in `revive.toml`. All exported symbols must have doc comments (enforced by the `exported` rule). No external tools need to be installed — `make lint` uses `go run`.
+Linting uses [revive](https://github.com/mgechev/revive) with config in `go/revive.toml`. All exported symbols must have doc comments (enforced by the `exported` rule). No external tools need to be installed — `make lint` uses `go run`.
 
 ## Testing
 
@@ -81,26 +84,29 @@ For end-to-end smoke tests (Docker required), see [docs/development/testing.md](
 ## Project Structure
 
 ```
-cmd/amika/               CLI commands (Cobra)
-cmd/amika-server/        HTTP server entry point
-internal/
-  sandbox/               Docker sandbox management, presets, volumes
-  auth/                  Credential discovery (Claude, Codex, OpenCode, Amp)
-  agentconfig/           Auto-mount agent credential files into containers
-  config/                XDG path resolution, state file locations
-  basedir/               XDG base directory resolution
-  httpapi/               HTTP handler for the REST API
-  app/                   Application service layer
-  ports/                 Port interfaces for Docker and stores
-  materialize/           Local sandbox script execution (v0 legacy)
-pkg/amika/               Public service API (used by CLI and HTTP server)
+go/                      Go module (github.com/gofixpoint/amika/go)
+  cmd/amika/             CLI commands (Cobra)
+  cmd/amika-server/      HTTP server entry point
+  internal/
+    sandbox/             Docker sandbox management, presets, volumes
+    auth/                Credential discovery (Claude, Codex, OpenCode, Amp)
+    agentconfig/         Auto-mount agent credential files into containers
+    config/              XDG path resolution, state file locations
+    basedir/             XDG base directory resolution
+    httpapi/             HTTP handler for the REST API
+    app/                 Application service layer
+    ports/               Port interfaces for Docker and stores
+    materialize/         Local sandbox script execution (v0 legacy)
+  pkg/amika/             Public service API (used by CLI and HTTP server)
+  test/                  Integration and contract tests
+sdk/typescript/          TypeScript SDK
 materialization-scripts/ Example scripts for pulling data
 docs/                    In-depth documentation
 ```
 
 ## Preset Images
 
-The `coder` and `claude` preset Docker images are auto-built on first use from Dockerfiles in `internal/sandbox/presets/`. See [docs/presets.md](docs/presets.md) for details.
+The `coder` and `claude` preset Docker images are auto-built on first use from Dockerfiles in `go/internal/sandbox/presets/`. See [docs/presets.md](docs/presets.md) for details.
 
 ## Releasing
 

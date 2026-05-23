@@ -1,4 +1,4 @@
-// CamelCase TS mirrors of the Go SDK types in internal/apiclient/client.go.
+// CamelCase TS mirrors of the Go SDK types in go/internal/apiclient/client.go.
 // Each request/response has explicit toWire/fromWire mappers to translate
 // between the SDK's camelCase developer surface and the snake_case JSON wire
 // format the server expects.

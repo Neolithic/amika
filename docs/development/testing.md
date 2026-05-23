@@ -74,14 +74,14 @@ To run a single expensive test directly:
 
 ```bash
 AMIKA_RUN_DOCKER_INTEGRATION=1 AMIKA_RUN_EXPENSIVE_TESTS=1 \
-  go test ./cmd/amika -run TestTopMaterialize_PresetAgentsAvailableOnPath -count=1
+  go -C go test ./cmd/amika -run TestTopMaterialize_PresetAgentsAvailableOnPath -count=1
 ```
 
 ## Coverage Gates
 
 Coverage thresholds are checked by `scripts/test/check_coverage.sh` and configured in:
 
-- `test/coverage-baseline.env`
+- `go/test/coverage-baseline.env`
 
 Current thresholds:
 
