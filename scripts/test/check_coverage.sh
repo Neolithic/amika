@@ -22,8 +22,8 @@ internal_pkgs="$(go -C go list ./internal/... | grep -Ev '/internal/mount($|/)')
 go -C go test $internal_pkgs -coverprofile="$tmp_internal" >/dev/null
 go -C go test ./cmd/amika -coverprofile="$tmp_cmd" >/dev/null
 
-internal_cov="$(go tool cover -func="$tmp_internal" | awk '/^total:/ {gsub("%", "", $3); print $3}')"
-cmd_cov="$(go tool cover -func="$tmp_cmd" | awk '/^total:/ {gsub("%", "", $3); print $3}')"
+internal_cov="$(go -C go tool cover -func="$tmp_internal" | awk '/^total:/ {gsub("%", "", $3); print $3}')"
+cmd_cov="$(go -C go tool cover -func="$tmp_cmd" | awk '/^total:/ {gsub("%", "", $3); print $3}')"
 
 printf 'internal coverage: %s%% (min %s%%)\n' "$internal_cov" "$min_internal"
 printf 'cmd/amika coverage: %s%% (min %s%%)\n' "$cmd_cov" "$min_cmd"
