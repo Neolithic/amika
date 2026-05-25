@@ -29,6 +29,7 @@
     "format": "pnpm dlx prettier --write .",
     "formatcheck": "pnpm dlx prettier --check .",
     "test": "vitest run",
+    "test:functional": "vitest run --config vitest.functional.config.ts",
     "ci": "pnpm run typecheck && pnpm run lint && pnpm run formatcheck && pnpm run build && pnpm test"
   },
   "devDependencies": {

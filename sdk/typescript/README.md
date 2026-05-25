@@ -124,3 +124,17 @@ pnpm build
 ```
 
 Tests use [Vitest](https://vitest.dev) with mocked `fetch` — no network or external binaries required.
+
+### Functional tests
+
+`test/functional/` exercises the SDK against a real Amika server. They are skipped when `AMIKA_API_URL` is unset, so `pnpm test` stays offline. To run them:
+
+```bash
+AMIKA_API_URL=https://app.amika.dev \
+AMIKA_API_TOKEN=amk_… \
+pnpm test:functional
+```
+
+Optional env vars: `AMIKA_TEST_REPO_URL`, `AMIKA_TEST_PRESET`, `AMIKA_TEST_AGENT_NAME`, `AMIKA_TEST_AGENT_CREDENTIAL_NAME`, `AMIKA_TEST_AGENT_CREDENTIAL_TYPE`, `AMIKA_TEST_BRANCH`, `AMIKA_TEST_SANDBOX_NAME_PREFIX`, `AMIKA_TEST_PROVIDER`. See `test/functional/helpers.ts` for details.
+
+The suite provisions a real sandbox and runs the full lifecycle (create → wait → list → get → SSH → sessions → agentSend → stop → start → delete), so a single run takes several minutes and creates billable resources. Sandboxes are cleaned up in `afterAll`, but the secrets API has no delete endpoint — test-created secrets accumulate.
