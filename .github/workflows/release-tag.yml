@@ -17,6 +17,8 @@ name: Create Release Tag
 #   amika@v1.2.3-rc.1
 #   amika-server@v1.2.3
 #   amika-server@v1.2.3-beta.1
+#   sdk-typescript@v1.2.3
+#   sdk-typescript@v1.2.3-rc.1
 
 on:
   workflow_dispatch:
@@ -28,6 +30,7 @@ on:
         options:
           - amika
           - amika-server
+          - sdk-typescript
       major:
         description: Major version number
         required: true
@@ -204,11 +207,25 @@ jobs:
         run: |
           git checkout "$TARGET_SHA"
 
-      - name: Verify repository is healthy enough to tag
+      - name: Verify Go repository is healthy enough to tag
+        if: inputs.component != 'sdk-typescript'
         run: |
           make fmtcheck
           make vet
           make test-unit
+
+      - name: Verify sdk/typescript/package.json version matches tag
+        if: inputs.component == 'sdk-typescript'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          expected="${VERSION#v}"
+          actual=$(node -p "require('./sdk/typescript/package.json').version")
+          if [ "$actual" != "$expected" ]; then
+            echo "sdk/typescript/package.json version ($actual) does not match tag version ($expected)." >&2
+            echo "Bump the package.json version on main before cutting this tag." >&2
+            exit 1
+          fi
 
       - name: Create and push annotated tag
         env:
