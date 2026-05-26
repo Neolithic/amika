@@ -26,8 +26,8 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "lint": "eslint",
-    "format": "pnpm dlx prettier --write .",
-    "formatcheck": "pnpm dlx prettier --check .",
+    "format": "pnpm exec prettier --write .",
+    "formatcheck": "pnpm exec prettier --check .",
     "test": "vitest run",
     "test:functional": "vitest run --config vitest.functional.config.ts",
     "ci": "pnpm run typecheck && pnpm run lint && pnpm run formatcheck && pnpm run build && pnpm test"
@@ -37,6 +37,7 @@
     "@types/node": "^20.12.0",
     "eslint": "^9.0.0",
     "globals": "^15.0.0",
+    "prettier": "^3.8.3",
     "tsc-alias": "^1.8.10",
     "typescript": "^5.5.0",
     "typescript-eslint": "^8.0.0",
