@@ -39,14 +39,37 @@ This is the same infra pattern used by Ramp, Coinbase, and Stripe for their in-h
 
 ## Quick Start
 
-**Prerequisites:** Go 1.21+, Docker, macOS or Linux
+**Prerequisites:** Docker, macOS or Linux (Go 1.21+ only needed to build from source)
 
 ### Install
+
+Install the latest release binary with the install script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gofixpoint/amika/main/install.sh | sh
+```
+
+This downloads the release binary, verifies its checksum, and installs `amika` to `/usr/local/bin` (override with `AMIKA_INSTALL_DIR`). Pin a specific version with `--install-version`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gofixpoint/amika/main/install.sh | sh -s -- --install-version 0.9.0
+```
+
+Once installed, the `amika` binary is on your `PATH` — run commands directly (e.g. `amika sandbox create`).
+
+<details>
+<summary>Build from source instead</summary>
+
+Requires Go 1.21+. Build outputs land in `dist/`:
 
 ```bash
 git clone https://github.com/gofixpoint/amika.git && cd amika
 make build
 ```
+
+When built from source, invoke the binary as `./dist/amika` (the examples below use this form).
+
+</details>
 
 ### Create Your First Sandbox
 
