@@ -59,41 +59,111 @@ func TestCaptureClaude_MissingTranscriptPath(t *testing.T) {
 	}
 }
 
-func TestCaptureCodex_MirrorsNewestSession(t *testing.T) {
+func TestCaptureCodex_MirrorsAllChangedSessions(t *testing.T) {
 	useCodexFallback(t)
 	home := t.TempDir()
-	dir := filepath.Join(home, ".codex", "sessions", "2026", "06", "01")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	older := filepath.Join(dir, "older.jsonl")
-	newer := filepath.Join(dir, "newer.jsonl")
-	if err := os.WriteFile(older, []byte(`{"k":"older"}`+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(newer, []byte(`{"k":"newer"}`+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Force older to be older than newer regardless of FS resolution.
-	past := time.Now().Add(-1 * time.Hour)
-	if err := os.Chtimes(older, past, past); err != nil {
-		t.Fatal(err)
-	}
-
 	stateDir := filepath.Join(home, "state")
+
+	// Two concurrent sessions on different days. Mirroring only the global
+	// newest would skip whichever session wrote less recently — exactly
+	// the regression this case guards against.
+	a := filepath.Join(home, ".codex", "sessions", "2026", "06", "01", "rollout-a.jsonl")
+	b := filepath.Join(home, ".codex", "sessions", "2026", "06", "02", "rollout-b.jsonl")
+	for _, p := range []string{a, b} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(a, []byte(`{"k":"a-turn-1"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte(`{"k":"b-turn-1"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Make a older than b so a clearly isn't the global newest.
+	past := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(a, past, past); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := CaptureCodex(home, stateDir); err != nil {
 		t.Fatalf("CaptureCodex: %v", err)
 	}
-	mirrored, err := os.ReadFile(filepath.Join(stateDir, "sessions", "codex", "newer.jsonl"))
+
+	// Layout is preserved so basenames can't collide across days.
+	gotA, err := os.ReadFile(filepath.Join(stateDir, "sessions", "codex", "2026", "06", "01", "rollout-a.jsonl"))
 	if err != nil {
-		t.Fatalf("reading mirror: %v", err)
+		t.Fatalf("session a not mirrored: %v", err)
 	}
-	if !strings.Contains(string(mirrored), `"newer"`) {
-		t.Errorf("mirrored unexpected content: %s", mirrored)
+	if !strings.Contains(string(gotA), "a-turn-1") {
+		t.Errorf("session a mirror has unexpected content: %s", gotA)
 	}
-	if _, err := os.Stat(filepath.Join(stateDir, "sessions", "codex", "older.jsonl")); !os.IsNotExist(err) {
-		t.Errorf("did not expect older session to be mirrored: %v", err)
+	gotB, err := os.ReadFile(filepath.Join(stateDir, "sessions", "codex", "2026", "06", "02", "rollout-b.jsonl"))
+	if err != nil {
+		t.Fatalf("session b not mirrored: %v", err)
+	}
+	if !strings.Contains(string(gotB), "b-turn-1") {
+		t.Errorf("session b mirror has unexpected content: %s", gotB)
+	}
+}
+
+func TestCaptureCodex_SkipsUpToDateMirrors(t *testing.T) {
+	useCodexFallback(t)
+	home := t.TempDir()
+	stateDir := filepath.Join(home, "state")
+
+	a := filepath.Join(home, ".codex", "sessions", "2026", "06", "01", "a.jsonl")
+	b := filepath.Join(home, ".codex", "sessions", "2026", "06", "01", "b.jsonl")
+	for _, p := range []string{a, b} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(a, []byte("a-v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte("b-v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := CaptureCodex(home, stateDir); err != nil {
+		t.Fatalf("CaptureCodex first: %v", err)
+	}
+
+	mirrorB := filepath.Join(stateDir, "sessions", "codex", "2026", "06", "01", "b.jsonl")
+	infoBefore, err := os.Stat(mirrorB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Only `a` advances on disk; `b` is unchanged. The second capture
+	// should rewrite a's mirror but leave b's alone (verified via mtime).
+	future := time.Now().Add(2 * time.Second)
+	if err := os.WriteFile(a, []byte("a-v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(a, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := CaptureCodex(home, stateDir); err != nil {
+		t.Fatalf("CaptureCodex second: %v", err)
+	}
+
+	gotA, err := os.ReadFile(filepath.Join(stateDir, "sessions", "codex", "2026", "06", "01", "a.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gotA), "a-v2") {
+		t.Errorf("a's mirror not refreshed: %s", gotA)
+	}
+
+	infoAfter, err := os.Stat(mirrorB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !infoAfter.ModTime().Equal(infoBefore.ModTime()) {
+		t.Errorf("b's mirror mtime changed (%v → %v), expected no rewrite", infoBefore.ModTime(), infoAfter.ModTime())
 	}
 }
 
@@ -136,14 +206,14 @@ func TestCaptureCodex_HonorsCODEX_HOME(t *testing.T) {
 	if err := CaptureCodex(home, stateDir); err != nil {
 		t.Fatalf("CaptureCodex: %v", err)
 	}
-	got, err := os.ReadFile(filepath.Join(stateDir, "sessions", "codex", "right.jsonl"))
+	got, err := os.ReadFile(filepath.Join(stateDir, "sessions", "codex", "2026", "06", "01", "right.jsonl"))
 	if err != nil {
 		t.Fatalf("expected right.jsonl to be mirrored: %v", err)
 	}
 	if !strings.Contains(string(got), `"right"`) {
 		t.Errorf("unexpected mirrored content: %s", got)
 	}
-	if _, err := os.Stat(filepath.Join(stateDir, "sessions", "codex", "wrong.jsonl")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(stateDir, "sessions", "codex", "2026", "01", "01", "wrong.jsonl")); !os.IsNotExist(err) {
 		t.Errorf("file under ~/.codex was mirrored despite CODEX_HOME override")
 	}
 }

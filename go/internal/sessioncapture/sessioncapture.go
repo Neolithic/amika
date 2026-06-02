@@ -21,7 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // Source identifies the agent that produced the session being captured.
@@ -69,24 +68,53 @@ func CaptureClaude(stdin io.Reader, stateDir string) error {
 	return copyFile(in.TranscriptPath, dst)
 }
 
-// CaptureCodex copies the most recently modified Codex session file under
-// the Codex state root into the amika state directory. Codex's notify hook
-// does not pass a session path, so we resolve the active session by mtime.
+// CaptureCodex mirrors every Codex session file whose source mtime is newer
+// than its mirror (or that has no mirror yet) under the Codex state root
+// into the amika state directory.
+//
+// Codex's notify payload does not include a session path. Picking only the
+// globally newest file across the tree would skip a turn whenever a second
+// concurrent Codex session wrote something more recently — so we walk the
+// whole tree and copy any file that's changed. Mirrors preserve Codex's
+// `YYYY/MM/DD/<rollout>.jsonl` layout under `<state>/sessions/codex/` so
+// nothing collides across days.
 //
 // The Codex state root is `$CODEX_HOME` when set, falling back to
-// `<homeDir>/.codex`. Returns nil with no error when no Codex session file
-// exists yet.
+// `<homeDir>/.codex`. Returns nil with no error when no Codex session
+// directory exists yet.
 func CaptureCodex(homeDir, stateDir string) error {
 	sessionsDir := filepath.Join(CodexHome(homeDir), "sessions")
-	latest, err := newestSessionFile(sessionsDir)
-	if err != nil {
-		return err
+	dstRoot := CaptureDir(stateDir, SourceCodex)
+
+	walkErr := filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return filepath.SkipAll
+			}
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+			return nil
+		}
+		rel, relErr := filepath.Rel(sessionsDir, path)
+		if relErr != nil {
+			return relErr
+		}
+		dst := filepath.Join(dstRoot, rel)
+
+		fresh, freshErr := mirrorIsFresh(path, dst)
+		if freshErr != nil {
+			return freshErr
+		}
+		if fresh {
+			return nil
+		}
+		return copyFile(path, dst)
+	})
+	if walkErr != nil && !errors.Is(walkErr, os.ErrNotExist) {
+		return walkErr
 	}
-	if latest == "" {
-		return nil
-	}
-	dst := filepath.Join(CaptureDir(stateDir, SourceCodex), filepath.Base(latest))
-	return copyFile(latest, dst)
+	return nil
 }
 
 // CodexHome returns the directory Codex uses for config, sessions, auth and
@@ -99,33 +127,21 @@ func CodexHome(homeDir string) string {
 	return filepath.Join(homeDir, ".codex")
 }
 
-func newestSessionFile(dir string) (string, error) {
-	var newest string
-	var newestMod time.Time
-	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return filepath.SkipAll
-			}
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-		info, infoErr := d.Info()
-		if infoErr != nil {
-			return infoErr
-		}
-		if info.ModTime().After(newestMod) {
-			newestMod = info.ModTime()
-			newest = path
-		}
-		return nil
-	})
-	if walkErr != nil && !errors.Is(walkErr, os.ErrNotExist) {
-		return "", walkErr
+// mirrorIsFresh reports whether dst exists and its mtime is at least as new
+// as src's. Used to skip rewrites of session files we've already mirrored.
+func mirrorIsFresh(src, dst string) (bool, error) {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return false, err
 	}
-	return newest, nil
+	dstInfo, err := os.Stat(dst)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return !srcInfo.ModTime().After(dstInfo.ModTime()), nil
 }
 
 func copyFile(src, dst string) error {
