@@ -98,3 +98,42 @@ func TestCaptureCodex_NoSessionsIsNoOp(t *testing.T) {
 		t.Errorf("expected no capture dir to be created, got %v", err)
 	}
 }
+
+func TestCaptureCodex_HonorsCODEX_HOME(t *testing.T) {
+	home := t.TempDir()
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+
+	// A file under ~/.codex/sessions must NOT be picked up when CODEX_HOME
+	// points elsewhere — otherwise we'd mirror a stale path.
+	bogus := filepath.Join(home, ".codex", "sessions", "2026", "01", "01", "wrong.jsonl")
+	if err := os.MkdirAll(filepath.Dir(bogus), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bogus, []byte(`{"k":"wrong"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	want := filepath.Join(codexHome, "sessions", "2026", "06", "01", "right.jsonl")
+	if err := os.MkdirAll(filepath.Dir(want), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(want, []byte(`{"k":"right"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stateDir := filepath.Join(home, "state")
+	if err := CaptureCodex(home, stateDir); err != nil {
+		t.Fatalf("CaptureCodex: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(stateDir, "sessions", "codex", "right.jsonl"))
+	if err != nil {
+		t.Fatalf("expected right.jsonl to be mirrored: %v", err)
+	}
+	if !strings.Contains(string(got), `"right"`) {
+		t.Errorf("unexpected mirrored content: %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "sessions", "codex", "wrong.jsonl")); !os.IsNotExist(err) {
+		t.Errorf("file under ~/.codex was mirrored despite CODEX_HOME override")
+	}
+}

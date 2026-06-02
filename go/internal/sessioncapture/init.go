@@ -51,12 +51,13 @@ type InitReport struct {
 }
 
 // Init wires the Stop hook into Claude Code's settings and a notify program
-// into Codex's config under homeDir. It is idempotent: running it twice is a
-// no-op.
+// into Codex's config under homeDir. The Codex side honors `CODEX_HOME` (see
+// CodexHome) so the hook is written where Codex will actually read it.
+// Init is idempotent: running it twice is a no-op.
 func Init(homeDir string, cmd HookCommand) (InitReport, error) {
 	rep := InitReport{
 		ClaudeSettingsPath: filepath.Join(homeDir, ".claude", "settings.json"),
-		CodexConfigPath:    filepath.Join(homeDir, ".codex", "config.toml"),
+		CodexConfigPath:    filepath.Join(CodexHome(homeDir), "config.toml"),
 	}
 	claudeUpdated, err := ensureClaudeStopHook(rep.ClaudeSettingsPath, cmd.ClaudeCommand())
 	if err != nil {

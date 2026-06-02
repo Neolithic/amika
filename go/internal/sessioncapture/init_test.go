@@ -145,6 +145,26 @@ notify = ["/old/path/amika", "sessions", "capture", "--source", "codex"]
 	}
 }
 
+func TestInit_HonorsCODEX_HOME(t *testing.T) {
+	home := t.TempDir()
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+
+	rep, err := Init(home, HookCommand{Exe: "/usr/local/bin/amika"})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if rep.CodexConfigPath != filepath.Join(codexHome, "config.toml") {
+		t.Errorf("CodexConfigPath = %q, want under CODEX_HOME (%q)", rep.CodexConfigPath, codexHome)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "config.toml")); err != nil {
+		t.Errorf("expected config.toml under CODEX_HOME: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "config.toml")); !os.IsNotExist(err) {
+		t.Errorf("config.toml should not be written to ~/.codex when CODEX_HOME is set: %v", err)
+	}
+}
+
 func TestInit_InsertsBeforeFirstSection(t *testing.T) {
 	home := t.TempDir()
 	cfg := filepath.Join(home, ".codex", "config.toml")

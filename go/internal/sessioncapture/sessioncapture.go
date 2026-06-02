@@ -2,10 +2,15 @@
 // transcripts into the amika state directory.
 //
 // Capture is driven by the agents themselves: `Init` writes hook entries into
-// `~/.claude/settings.json` (Stop hook) and `~/.codex/config.toml` (notify
-// program) that invoke `amika sessions capture --source ...` whenever the
-// agent finishes a turn. Each invocation copies the relevant session JSONL
-// into `<state>/sessions/<source>/`. No daemon, no background process.
+// `~/.claude/settings.json` (Stop hook) and `<codex-home>/config.toml`
+// (notify program) that invoke `amika sessions capture --source ...`
+// whenever the agent finishes a turn. Each invocation copies the relevant
+// session JSONL into `<state>/sessions/<source>/`. No daemon, no background
+// process.
+//
+// `<codex-home>` is `$CODEX_HOME` when set, otherwise `~/.codex` (see
+// CodexHome). Honoring the env var matters because Codex itself reads
+// config and writes sessions there, not under `~/.codex`.
 package sessioncapture
 
 import (
@@ -65,13 +70,14 @@ func CaptureClaude(stdin io.Reader, stateDir string) error {
 }
 
 // CaptureCodex copies the most recently modified Codex session file under
-// ~/.codex/sessions into the amika state directory. Codex's notify hook
+// the Codex state root into the amika state directory. Codex's notify hook
 // does not pass a session path, so we resolve the active session by mtime.
 //
-// homeDir is the directory containing the `.codex` config (i.e. the user's
-// home). Returns nil with no error when no Codex session file exists yet.
+// The Codex state root is `$CODEX_HOME` when set, falling back to
+// `<homeDir>/.codex`. Returns nil with no error when no Codex session file
+// exists yet.
 func CaptureCodex(homeDir, stateDir string) error {
-	sessionsDir := filepath.Join(homeDir, ".codex", "sessions")
+	sessionsDir := filepath.Join(CodexHome(homeDir), "sessions")
 	latest, err := newestSessionFile(sessionsDir)
 	if err != nil {
 		return err
@@ -81,6 +87,16 @@ func CaptureCodex(homeDir, stateDir string) error {
 	}
 	dst := filepath.Join(CaptureDir(stateDir, SourceCodex), filepath.Base(latest))
 	return copyFile(latest, dst)
+}
+
+// CodexHome returns the directory Codex uses for config, sessions, auth and
+// related state. Honors the `CODEX_HOME` environment variable when set,
+// falling back to `<homeDir>/.codex`.
+func CodexHome(homeDir string) string {
+	if v := os.Getenv("CODEX_HOME"); v != "" {
+		return v
+	}
+	return filepath.Join(homeDir, ".codex")
 }
 
 func newestSessionFile(dir string) (string, error) {
