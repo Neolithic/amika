@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+// useCodexFallback ensures CodexHome falls back to <home>/.codex by masking
+// any ambient CODEX_HOME for the duration of the test. Tests that exercise
+// the override use t.Setenv directly instead.
+func useCodexFallback(t *testing.T) {
+	t.Helper()
+	t.Setenv("CODEX_HOME", "")
+}
+
 func TestCaptureClaude_MirrorsTranscript(t *testing.T) {
 	tmp := t.TempDir()
 	transcript := filepath.Join(tmp, "src", "abc.jsonl")
@@ -52,6 +60,7 @@ func TestCaptureClaude_MissingTranscriptPath(t *testing.T) {
 }
 
 func TestCaptureCodex_MirrorsNewestSession(t *testing.T) {
+	useCodexFallback(t)
 	home := t.TempDir()
 	dir := filepath.Join(home, ".codex", "sessions", "2026", "06", "01")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -89,6 +98,7 @@ func TestCaptureCodex_MirrorsNewestSession(t *testing.T) {
 }
 
 func TestCaptureCodex_NoSessionsIsNoOp(t *testing.T) {
+	useCodexFallback(t)
 	home := t.TempDir()
 	stateDir := filepath.Join(home, "state")
 	if err := CaptureCodex(home, stateDir); err != nil {

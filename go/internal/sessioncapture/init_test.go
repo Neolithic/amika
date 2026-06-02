@@ -9,6 +9,7 @@ import (
 )
 
 func TestInit_FreshClaudeAndCodex(t *testing.T) {
+	useCodexFallback(t)
 	home := t.TempDir()
 	rep, err := Init(home, HookCommand{Exe: "/usr/local/bin/amika"})
 	if err != nil {
@@ -35,6 +36,7 @@ func TestInit_FreshClaudeAndCodex(t *testing.T) {
 }
 
 func TestInit_Idempotent(t *testing.T) {
+	useCodexFallback(t)
 	home := t.TempDir()
 	cmd := HookCommand{Exe: "/usr/local/bin/amika"}
 	if _, err := Init(home, cmd); err != nil {
@@ -50,6 +52,7 @@ func TestInit_Idempotent(t *testing.T) {
 }
 
 func TestInit_PreservesExistingClaudeKeys(t *testing.T) {
+	useCodexFallback(t)
 	home := t.TempDir()
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
@@ -85,6 +88,7 @@ func TestInit_PreservesExistingClaudeKeys(t *testing.T) {
 }
 
 func TestInit_PreservesCodexConflict(t *testing.T) {
+	useCodexFallback(t)
 	home := t.TempDir()
 	cfg := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
@@ -117,6 +121,7 @@ trust_level = "trusted"
 }
 
 func TestInit_UpdatesExistingAmikaNotify(t *testing.T) {
+	useCodexFallback(t)
 	home := t.TempDir()
 	cfg := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
@@ -166,6 +171,7 @@ func TestInit_HonorsCODEX_HOME(t *testing.T) {
 }
 
 func TestInit_InsertsBeforeFirstSection(t *testing.T) {
+	useCodexFallback(t)
 	home := t.TempDir()
 	cfg := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
