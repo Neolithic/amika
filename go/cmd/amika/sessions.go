@@ -31,6 +31,12 @@ Writes to:
   ~/.claude/settings.json   (adds a Stop hook)
   ~/.codex/config.toml      (sets the notify program)
 
+Captured transcripts land under:
+  $AMIKA_STATE_DIRECTORY/sessions/{claude,codex}/
+(default $AMIKA_STATE_DIRECTORY is ~/.local/state/amika).
+
+The exact destination directories are printed when the command runs.
+
 This command is idempotent.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
@@ -45,6 +51,10 @@ This command is idempotent.`,
 		rep, err := sessioncapture.Init(home, hookCmd)
 		if err != nil {
 			return err
+		}
+		stateDir, err := config.StateDir()
+		if err != nil {
+			return fmt.Errorf("resolving state directory: %w", err)
 		}
 		out := cmd.OutOrStdout()
 		if rep.ClaudeUpdated {
@@ -62,6 +72,9 @@ This command is idempotent.`,
 		default:
 			fmt.Fprintf(out, "Notify program already set in %s\n", rep.CodexConfigPath)
 		}
+		fmt.Fprintln(out, "Captures will be written to:")
+		fmt.Fprintf(out, "  claude: %s\n", sessioncapture.CaptureDir(stateDir, sessioncapture.SourceClaude))
+		fmt.Fprintf(out, "  codex:  %s\n", sessioncapture.CaptureDir(stateDir, sessioncapture.SourceCodex))
 		return nil
 	},
 }

@@ -44,6 +44,30 @@ func TestSessionsCapture_AcceptsCodexNotifyPayload(t *testing.T) {
 	}
 }
 
+// TestSessionsCaptureInit_PrintsDestinations ensures `capture-init` tells the
+// user where mirrored sessions will land, so they don't have to grep the help
+// text or guess the XDG path.
+func TestSessionsCaptureInit_PrintsDestinations(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AMIKA_STATE_DIRECTORY", stateDir)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+
+	out, err := runRootCommand("sessions", "capture-init")
+	if err != nil {
+		t.Fatalf("capture-init: %v (out=%q)", err, out)
+	}
+	for _, want := range []string{
+		"Captures will be written to:",
+		filepath.Join(stateDir, "sessions", "claude"),
+		filepath.Join(stateDir, "sessions", "codex"),
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q\n--- got ---\n%s", want, out)
+		}
+	}
+}
+
 func TestSessionsCapture_RejectsExtraArgs(t *testing.T) {
 	t.Setenv("AMIKA_STATE_DIRECTORY", t.TempDir())
 	// Two positionals exceeds Codex's one-payload contract; cobra should
