@@ -75,8 +75,15 @@ Codex into the amika state directory.
 This is intended to be invoked by the agent's own hook system (see
 "amika sessions capture-init"), not by hand. The --source flag selects
 which agent's session to capture; the Claude variant reads the hook
-payload from stdin to learn the transcript path.`,
-	Args: cobra.NoArgs,
+payload from stdin to learn the transcript path, while Codex's notify
+hook appends a JSON event payload as a positional argument that we
+accept and ignore.`,
+	// Codex's notify hook invokes the configured argv with one trailing
+	// JSON payload, e.g. '{"type":"agent-turn-complete",...}'. We accept
+	// 0 or 1 positional so that path doesn't fail at arg validation; the
+	// payload itself isn't needed for the mirror (we resolve the active
+	// session by mtime).
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		source, _ := cmd.Flags().GetString("source")
 		stateDir, err := config.StateDir()
