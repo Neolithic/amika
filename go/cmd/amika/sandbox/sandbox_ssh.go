@@ -42,7 +42,7 @@ func execSSH(client *apiclient.Client, name string, forcePTY bool, extraArgs []s
 }
 
 var sandboxSSHCmd = &cobra.Command{
-	Use:   "ssh <name> [-- <command>...]",
+	Use:   "ssh [flags] <name> [-- <command>...]",
 	Short: "SSH into a remote sandbox",
 	Long: `Connect to a remote sandbox via SSH, or revoke SSH access.
 Optionally pass a command to execute on the remote sandbox instead of opening an interactive session.
