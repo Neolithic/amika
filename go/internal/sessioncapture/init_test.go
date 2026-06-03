@@ -152,6 +152,48 @@ notify = ["/old/path/amika", "sessions", "capture", "--source", "codex"]
 	}
 }
 
+func TestInit_UpdatesMultilineAmikaNotify(t *testing.T) {
+	useCodexFallback(t)
+	home := t.TempDir()
+	cfg := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	contents := `model = "gpt-5"
+notify = [
+  "/old/path/amika",
+  "sessions",
+  "capture",
+  "--source",
+  "codex",
+]
+`
+	if err := os.WriteFile(cfg, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Init(home, HookCommand{Exe: "/new/path/amika"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.CodexUpdated {
+		t.Errorf("expected multiline amika notify to be replaced, got %+v", rep)
+	}
+	if rep.CodexConflict != "" {
+		t.Errorf("expected no conflict for amika-pointed multiline notify, got %q", rep.CodexConflict)
+	}
+	got, _ := os.ReadFile(cfg)
+	if !strings.Contains(string(got), `notify = ["/new/path/amika", "sessions", "capture", "--source", "codex"]`) {
+		t.Errorf("notify not rewritten to single-line form:\n%s", got)
+	}
+	if strings.Contains(string(got), "/old/path/amika") {
+		t.Errorf("old multiline entries still present:\n%s", got)
+	}
+	if !strings.Contains(string(got), `model = "gpt-5"`) {
+		t.Errorf("unrelated keys lost:\n%s", got)
+	}
+}
+
 func TestInit_TreatsLookalikeNotifyAsConflict(t *testing.T) {
 	useCodexFallback(t)
 	for _, name := range []string{"notamika", "my-amika", "amikatool"} {

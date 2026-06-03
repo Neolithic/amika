@@ -296,16 +296,18 @@ func ensureCodexNotify(path string, argv []string) (updated bool, conflict strin
 	}
 
 	lines := splitLines(string(data))
-	idx, existing := findTopLevelNotify(lines)
+	start, end, existing := findTopLevelNotify(lines)
 
-	if idx >= 0 {
+	if start >= 0 {
 		if existing == want {
 			return false, "", nil
 		}
 		if !codexNotifyIsAmika(existing) {
 			return false, existing, nil
 		}
-		lines[idx] = "notify = " + want
+		replaced := append([]string{}, lines[:start]...)
+		replaced = append(replaced, "notify = "+want)
+		lines = append(replaced, lines[end+1:]...)
 	} else {
 		lines = insertCodexNotify(lines, "notify = "+want)
 	}
@@ -372,24 +374,59 @@ func splitLines(s string) []string {
 
 // findTopLevelNotify locates a top-level `notify = ...` assignment, ignoring
 // any assignments that appear after the first `[section]` header. Returns the
-// line index and the trimmed value (the right-hand side), or (-1, "").
-func findTopLevelNotify(lines []string) (int, string) {
+// line range (start, end inclusive) and the trimmed value (right-hand side),
+// or (-1, -1, "") when no top-level notify exists.
+//
+// When the value is an inline array spread across multiple lines, e.g.
+//
+//	notify = [
+//	  "amika",
+//	  "sessions",
+//	]
+//
+// the returned range covers every line of the assignment and the value is the
+// joined text, so [[codexNotifyIsAmika]] can parse it as TOML.
+func findTopLevelNotify(lines []string) (int, int, string) {
 	for i, raw := range lines {
 		trimmed := strings.TrimSpace(raw)
 		if strings.HasPrefix(trimmed, "[") {
-			return -1, ""
+			return -1, -1, ""
 		}
-		if strings.HasPrefix(trimmed, "notify") {
-			rest := strings.TrimPrefix(trimmed, "notify")
-			rest = strings.TrimLeft(rest, " \t")
-			if !strings.HasPrefix(rest, "=") {
-				continue
+		if !strings.HasPrefix(trimmed, "notify") {
+			continue
+		}
+		rest := strings.TrimPrefix(trimmed, "notify")
+		rest = strings.TrimLeft(rest, " \t")
+		if !strings.HasPrefix(rest, "=") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(rest, "="))
+		end := i
+		if strings.HasPrefix(value, "[") && !tomlValueParses(value) {
+			var buf strings.Builder
+			buf.WriteString(value)
+			for j := i + 1; j < len(lines); j++ {
+				buf.WriteByte('\n')
+				buf.WriteString(lines[j])
+				end = j
+				if tomlValueParses(buf.String()) {
+					break
+				}
 			}
-			rest = strings.TrimSpace(strings.TrimPrefix(rest, "="))
-			return i, rest
+			value = buf.String()
 		}
+		return i, end, value
 	}
-	return -1, ""
+	return -1, -1, ""
+}
+
+// tomlValueParses reports whether value is a complete, parseable TOML value
+// (any type). We use it to detect the end of a possibly-multiline inline array
+// without hand-rolling a TOML lexer.
+func tomlValueParses(value string) bool {
+	var holder map[string]interface{}
+	_, err := toml.Decode("x = "+value+"\n", &holder)
+	return err == nil
 }
 
 // codexNotifyIsAmika reports whether the value of `notify` invokes the amika
