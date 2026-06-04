@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 
+	"github.com/gofixpoint/amika/go/internal/basedir"
 	"github.com/gofixpoint/amika/go/internal/runmode"
 	"github.com/gofixpoint/amika/go/internal/ssh"
 	"github.com/spf13/cobra"
@@ -122,21 +122,45 @@ Examples:
 			return fmt.Errorf("server returned empty SSH destination")
 		}
 
-		fields := strings.Fields(info.SSHDestination)
-		remoteHost := fields[len(fields)-1]
+		// Key the SSH host alias on the immutable sandbox id, not the rotating
+		// connection token, so Cursor re-links its Remote-SSH session (and agent
+		// chat) to the same host across reconnects. Older servers omit the id
+		// from the SSH response, so fall back to a sandbox lookup.
+		sandboxID := info.SandboxID
+		sandboxName := info.SandboxName
+		if sandboxID == "" {
+			sb, err := client.GetSandbox(name)
+			if err != nil {
+				return fmt.Errorf("look up sandbox id: %w", err)
+			}
+			sandboxID = sb.ID
+			sandboxName = sb.Name
+		}
+		if sandboxName == "" {
+			sandboxName = name
+		}
+
+		entry, err := ssh.NewHostEntry(sandboxID, sandboxName, info.SSHDestination, info.ExpiresAt)
+		if err != nil {
+			return err
+		}
+		alias, err := ssh.UpsertHost(basedir.New(""), entry)
+		if err != nil {
+			return fmt.Errorf("write managed SSH config: %w", err)
+		}
 
 		remotePath := "/home/amika/workspace"
 		if info.RepoName != "" {
 			remotePath = remotePath + "/" + info.RepoName
 		}
 
-		cursorCmd := exec.Command("cursor", "--remote", "ssh-remote+"+remoteHost, remotePath)
+		cursorCmd := exec.Command("cursor", "--remote", "ssh-remote+"+alias, remotePath)
 		cursorCmd.Stdin = os.Stdin
 		cursorCmd.Stdout = os.Stdout
 		cursorCmd.Stderr = os.Stderr
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Opening sandbox %q in Cursor via SSH (%s)...\n", name, remoteHost)
-		fmt.Fprintf(cmd.OutOrStdout(), "Running: cursor --remote ssh-remote+%s %s\n", remoteHost, remotePath)
+		fmt.Fprintf(cmd.OutOrStdout(), "Opening sandbox %q in Cursor via SSH (%s)...\n", name, alias)
+		fmt.Fprintf(cmd.OutOrStdout(), "Running: cursor --remote ssh-remote+%s %s\n", alias, remotePath)
 		fmt.Fprintf(cmd.OutOrStdout(), "Hint: if the file explorer is not visible, press Cmd+Shift+E in Cursor to open it.\n")
 		if err := cursorCmd.Run(); err != nil {
 			return fmt.Errorf("cursor failed: %w\n\nMake sure the \"Remote - SSH\" extension is installed in Cursor", err)

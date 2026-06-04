@@ -91,6 +91,24 @@ func ParseDestination(dest string) (Destination, error) {
 	return d, nil
 }
 
+// NewHostEntry builds a managed host entry for a sandbox from its ssh
+// destination string and identity. The destination is parsed (rather than
+// split on whitespace) so an explicit port survives into the rendered config.
+func NewHostEntry(sandboxID, sandboxName, destination, expiresAt string) (HostEntry, error) {
+	d, err := ParseDestination(destination)
+	if err != nil {
+		return HostEntry{}, err
+	}
+	return HostEntry{
+		SandboxID:   sandboxID,
+		SandboxName: sandboxName,
+		HostName:    d.Host,
+		User:        d.User,
+		Port:        d.Port,
+		ExpiresAt:   expiresAt,
+	}, nil
+}
+
 // Upsert adds or replaces the entry for a sandbox id, keeping entries sorted by
 // id so the rendered config is deterministic.
 func (s *HostsState) Upsert(entry HostEntry) {

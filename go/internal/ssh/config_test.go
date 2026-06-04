@@ -50,6 +50,30 @@ func TestParseDestination(t *testing.T) {
 	}
 }
 
+func TestNewHostEntry(t *testing.T) {
+	entry, err := NewHostEntry("sb_1", "my-sandbox", "-p 2222 token@ssh.app.daytona.io", "2026-06-04T18:30:00.000Z")
+	if err != nil {
+		t.Fatalf("NewHostEntry: %v", err)
+	}
+	want := HostEntry{
+		SandboxID:   "sb_1",
+		SandboxName: "my-sandbox",
+		HostName:    "ssh.app.daytona.io",
+		User:        "token",
+		Port:        2222,
+		ExpiresAt:   "2026-06-04T18:30:00.000Z",
+	}
+	if entry != want {
+		t.Fatalf("entry = %+v, want %+v", entry, want)
+	}
+}
+
+func TestNewHostEntryRejectsEmptyDestination(t *testing.T) {
+	if _, err := NewHostEntry("sb_1", "n", "", ""); err == nil {
+		t.Fatal("expected error for empty destination")
+	}
+}
+
 func TestRender(t *testing.T) {
 	state := HostsState{Hosts: []HostEntry{
 		{SandboxID: "sb_1", SandboxName: "my-sandbox", HostName: "ssh.app.daytona.io", User: "token"},
