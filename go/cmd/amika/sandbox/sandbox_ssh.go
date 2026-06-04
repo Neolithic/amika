@@ -7,39 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 
-	"github.com/gofixpoint/amika/go/internal/apiclient"
 	"github.com/gofixpoint/amika/go/internal/runmode"
+	"github.com/gofixpoint/amika/go/internal/ssh"
 	"github.com/spf13/cobra"
 )
-
-func execSSH(client *apiclient.Client, name string, forcePTY bool, extraArgs []string) error {
-	info, err := client.GetSSH(name)
-	if err != nil {
-		return err
-	}
-	if info.SSHDestination == "" {
-		return fmt.Errorf("server returned empty SSH destination")
-	}
-
-	sshArgs := strings.Fields(info.SSHDestination)
-
-	if forcePTY {
-		dest := sshArgs[len(sshArgs)-1]
-		sshArgs = append(sshArgs[:len(sshArgs)-1], "-t", dest)
-	}
-
-	if len(extraArgs) > 0 {
-		sshArgs = append(sshArgs, extraArgs...)
-	}
-
-	sshBin, err := exec.LookPath("ssh")
-	if err != nil {
-		return fmt.Errorf("ssh not found: %w", err)
-	}
-	return syscall.Exec(sshBin, append([]string{"ssh"}, sshArgs...), os.Environ())
-}
 
 var sandboxSSHCmd = &cobra.Command{
 	Use:   "ssh <name> [-- <command>...]",
@@ -98,7 +70,7 @@ Examples:
 		if len(args) > 1 {
 			extraArgs = args[1:]
 		}
-		return execSSH(client, name, forcePTY, extraArgs)
+		return ssh.ExecSSH(client, name, forcePTY, extraArgs)
 	},
 }
 
