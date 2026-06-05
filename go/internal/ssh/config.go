@@ -203,6 +203,10 @@ func EnsureInclude(paths basedir.Paths) error {
 	if err != nil {
 		return err
 	}
+	writePath, err := resolveWriteTarget(configPath)
+	if err != nil {
+		return err
+	}
 	includeLine := "Include " + basedir.SSHAmikaConfigName()
 
 	existing, err := os.ReadFile(configPath)
@@ -219,7 +223,7 @@ func EnsureInclude(paths basedir.Paths) error {
 	} else {
 		content = includeLine + "\n\n" + string(existing)
 	}
-	return writeFileAtomic(configPath, []byte(content), 0o600)
+	return writeFileAtomic(writePath, []byte(content), 0o600)
 }
 
 // hasIncludeLine reports whether the config already includes the managed file.
@@ -285,4 +289,33 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("rename %q to %q: %w", tmpName, path, err)
 	}
 	return nil
+}
+
+func resolveWriteTarget(path string) (string, error) {
+	resolved := path
+	for i := 0; i < 32; i++ {
+		info, err := os.Lstat(resolved)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return resolved, nil
+			}
+			return "", fmt.Errorf("stat %q: %w", resolved, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return resolved, nil
+		}
+
+		target, err := os.Readlink(resolved)
+		if err != nil {
+			return "", fmt.Errorf("read symlink %q: %w", resolved, err)
+		}
+		if target == "" {
+			return "", fmt.Errorf("symlink %q has empty target", resolved)
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(resolved), target)
+		}
+		resolved = filepath.Clean(target)
+	}
+	return "", fmt.Errorf("too many symlinks resolving %q", path)
 }

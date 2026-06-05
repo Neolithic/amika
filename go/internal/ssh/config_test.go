@@ -191,6 +191,57 @@ func TestEnsureIncludePreservesExistingConfig(t *testing.T) {
 	}
 }
 
+func TestEnsureIncludePreservesSymlinkedConfig(t *testing.T) {
+	paths := testPaths(t)
+	configPath, _ := paths.SSHConfigFile()
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := filepath.Join(t.TempDir(), "dotfiles")
+	if err := os.MkdirAll(targetDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	targetPath := filepath.Join(targetDir, "ssh_config")
+	existing := "Host example\n  HostName example.com\n"
+	if err := os.WriteFile(targetPath, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	relativeTarget, err := filepath.Rel(filepath.Dir(configPath), targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(relativeTarget, configPath); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EnsureInclude(paths); err != nil {
+		t.Fatalf("EnsureInclude: %v", err)
+	}
+
+	info, err := os.Lstat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("%q is no longer a symlink", configPath)
+	}
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Include "+basedir.SSHAmikaConfigName()) {
+		t.Errorf("target config missing include:\n%s", content)
+	}
+	if !strings.Contains(content, existing) {
+		t.Errorf("target config did not preserve existing content:\n%s", content)
+	}
+	assertPerm(t, targetPath, 0o600)
+}
+
 func TestUpsertHostWritesAllArtifacts(t *testing.T) {
 	paths := testPaths(t)
 
@@ -249,6 +300,8 @@ func TestUpsertHostWritesAllArtifacts(t *testing.T) {
 func testPaths(t *testing.T) basedir.Paths {
 	t.Helper()
 	home := t.TempDir()
+	// basedir.New(home) only controls the fallback home-derived paths. Pin
+	// XDG_STATE_HOME too so package tests never touch the developer's real state.
 	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "state"))
 	return basedir.New(home)
 }
