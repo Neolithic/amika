@@ -26,14 +26,14 @@ under a "data" key, alongside a "filename" key naming the source file (omitted
 for stdin). With multiple files, one JSON line is emitted per file, in order.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			out := cmd.OutOrStdout()
-			enc := json.NewEncoder(out)
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			stdin := cmd.InOrStdin()
 
 			if len(args) == 0 {
-				return emit(enc, os.Stdin, "")
+				return emit(enc, stdin, "")
 			}
 			for _, arg := range args {
-				if err := emitPath(enc, arg); err != nil {
+				if err := emitPath(enc, stdin, arg); err != nil {
 					return err
 				}
 			}
@@ -51,11 +51,11 @@ type record struct {
 	Data     map[string]any `json:"data"`
 }
 
-// emitPath parses the frontmatter of a single path ("-" meaning stdin) and
-// writes it as a JSON line.
-func emitPath(enc *json.Encoder, path string) error {
+// emitPath parses the frontmatter of a single path ("-" meaning stdin, read
+// from stdin) and writes it as a JSON line.
+func emitPath(enc *json.Encoder, stdin io.Reader, path string) error {
 	if path == "-" {
-		return emit(enc, os.Stdin, "")
+		return emit(enc, stdin, "")
 	}
 	f, err := os.Open(path)
 	if err != nil {

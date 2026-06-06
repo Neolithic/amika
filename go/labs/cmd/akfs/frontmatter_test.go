@@ -1,40 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/spf13/cobra"
 )
 
 const docA = "---\ntitle: First doc\ntags: [a, b]\n---\nbody\n"
 const docB = "---\ntitle: Second doc\nstatus: draft\n---\nbody\n"
-
-// frontmatterCmd returns the registered "frontmatter" command.
-func frontmatterCmd(t *testing.T) *cobra.Command {
-	t.Helper()
-	for _, c := range rootCmd.Commands() {
-		if c.Name() == "frontmatter" {
-			return c
-		}
-	}
-	t.Fatal("frontmatter command not registered")
-	return nil
-}
-
-// mustJSON returns the compact JSON encoding of v, failing the test on error.
-func mustJSON(t *testing.T, v any) string {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	return string(b)
-}
+const docStdin = "---\ntitle: From stdin\n---\nbody\n"
 
 // writeTemp writes content to a temp file and returns its path.
 func writeTemp(t *testing.T, content string) string {
@@ -46,110 +22,145 @@ func writeTemp(t *testing.T, content string) string {
 	return path
 }
 
-// withStdin replaces os.Stdin with a file holding content for the duration of
-// fn, restoring it afterward.
-func withStdin(t *testing.T, content string, fn func()) {
+// decodeLines parses the JSONL output into records (the CLI's JSON envelope).
+func decodeLines(t *testing.T, out string) []record {
 	t.Helper()
-	path := writeTemp(t, content)
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("open stdin file: %v", err)
+	var recs []record
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var r record
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("invalid JSON line %q: %v", line, err)
+		}
+		recs = append(recs, r)
 	}
-	defer f.Close()
-	old := os.Stdin
-	os.Stdin = f
-	defer func() { os.Stdin = old }()
-	fn()
+	return recs
 }
 
-func TestFrontmatterCommandSingleFile(t *testing.T) {
-	cmd := frontmatterCmd(t)
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-
+func TestFrontmatterSingleFile(t *testing.T) {
 	path := writeTemp(t, docA)
-	if err := cmd.RunE(cmd, []string{path}); err != nil {
-		t.Fatalf("RunE: %v", err)
+	out, err := runRootCommand("frontmatter", path)
+	if err != nil {
+		t.Fatalf("runRootCommand: %v", err)
 	}
-
-	want := `{"filename":` + mustJSON(t, path) + `,"data":{"tags":["a","b"],"title":"First doc"}}` + "\n"
-	if buf.String() != want {
-		t.Errorf("output = %q, want %q", buf.String(), want)
+	recs := decodeLines(t, out)
+	if len(recs) != 1 {
+		t.Fatalf("got %d records, want 1: %q", len(recs), out)
 	}
-}
-
-func TestFrontmatterCommandMultipleFiles(t *testing.T) {
-	cmd := frontmatterCmd(t)
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-
-	args := []string{writeTemp(t, docA), writeTemp(t, docB)}
-	if err := cmd.RunE(cmd, args); err != nil {
-		t.Fatalf("RunE: %v", err)
+	if recs[0].Filename != path {
+		t.Errorf("filename = %q, want %q", recs[0].Filename, path)
 	}
-
-	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("got %d lines, want 2: %q", len(lines), buf.String())
-	}
-	// Each line must be a {"filename": ..., "data": {...}} envelope naming the
-	// corresponding source file, in order.
-	for i, line := range lines {
-		var env struct {
-			Filename string         `json:"filename"`
-			Data     map[string]any `json:"data"`
-		}
-		if err := json.Unmarshal([]byte(line), &env); err != nil {
-			t.Fatalf("line %d not valid JSON: %v", i, err)
-		}
-		if env.Filename != args[i] {
-			t.Errorf("line %d filename = %q, want %q", i, env.Filename, args[i])
-		}
-		if env.Data["title"] == nil {
-			t.Errorf("line %d missing data.title: %q", i, line)
-		}
+	if recs[0].Data["title"] != "First doc" {
+		t.Errorf("data.title = %v, want %q", recs[0].Data["title"], "First doc")
 	}
 }
 
-func TestFrontmatterCommandStdin(t *testing.T) {
-	cmd := frontmatterCmd(t)
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
+// TestFrontmatterAlias verifies the "fm" alias routes to the same command.
+func TestFrontmatterAlias(t *testing.T) {
+	path := writeTemp(t, docA)
+	out, err := runRootCommand("fm", path)
+	if err != nil {
+		t.Fatalf("runRootCommand: %v", err)
+	}
+	if recs := decodeLines(t, out); len(recs) != 1 || recs[0].Filename != path {
+		t.Errorf("alias output = %q, want single record for %q", out, path)
+	}
+}
 
-	// No args reads stdin; "-" also reads stdin via emitPath.
-	for _, args := range [][]string{{}, {"-"}} {
-		buf.Reset()
-		withStdin(t, docA, func() {
-			if err := cmd.RunE(cmd, args); err != nil {
-				t.Fatalf("RunE(%v): %v", args, err)
-			}
-		})
-		// stdin has no filename, so the field is omitted.
-		want := `{"data":{"tags":["a","b"],"title":"First doc"}}` + "\n"
-		if buf.String() != want {
-			t.Errorf("args %v: output = %q, want %q", args, buf.String(), want)
+func TestFrontmatterMultipleFiles(t *testing.T) {
+	a, b := writeTemp(t, docA), writeTemp(t, docB)
+	out, err := runRootCommand("frontmatter", a, b)
+	if err != nil {
+		t.Fatalf("runRootCommand: %v", err)
+	}
+	recs := decodeLines(t, out)
+	if len(recs) != 2 {
+		t.Fatalf("got %d records, want 2: %q", len(recs), out)
+	}
+	// Filenames appear in argument order.
+	if recs[0].Filename != a || recs[1].Filename != b {
+		t.Errorf("filenames = [%q, %q], want [%q, %q]", recs[0].Filename, recs[1].Filename, a, b)
+	}
+}
+
+func TestFrontmatterStdin(t *testing.T) {
+	// No args, and explicit "-", both read stdin and omit the filename field.
+	for _, args := range [][]string{{"frontmatter"}, {"frontmatter", "-"}} {
+		out, err := runRootCommandWithStdin(docStdin, args...)
+		if err != nil {
+			t.Fatalf("runRootCommandWithStdin(%v): %v", args, err)
+		}
+		recs := decodeLines(t, out)
+		if len(recs) != 1 {
+			t.Fatalf("args %v: got %d records, want 1: %q", args, len(recs), out)
+		}
+		if recs[0].Filename != "" {
+			t.Errorf("args %v: filename = %q, want empty (omitted) for stdin", args, recs[0].Filename)
+		}
+		if recs[0].Data["title"] != "From stdin" {
+			t.Errorf("args %v: data.title = %v, want %q", args, recs[0].Data["title"], "From stdin")
 		}
 	}
 }
 
-func TestFrontmatterCommandMissingFile(t *testing.T) {
-	cmd := frontmatterCmd(t)
-	cmd.SetOut(&bytes.Buffer{})
+// TestFrontmatterFilesAndStdinInterleaved is the behavior in question: mixing
+// file paths and stdin (via "-") in a single invocation. Each input is emitted
+// in argument order, with stdin read at the position of "-".
+func TestFrontmatterFilesAndStdinInterleaved(t *testing.T) {
+	a, b := writeTemp(t, docA), writeTemp(t, docB)
+	out, err := runRootCommandWithStdin(docStdin, "frontmatter", a, "-", b)
+	if err != nil {
+		t.Fatalf("runRootCommandWithStdin: %v", err)
+	}
+	recs := decodeLines(t, out)
+	if len(recs) != 3 {
+		t.Fatalf("got %d records, want 3: %q", len(recs), out)
+	}
+	if recs[0].Filename != a {
+		t.Errorf("record 0 filename = %q, want %q", recs[0].Filename, a)
+	}
+	// The middle record is stdin: no filename, parsed from docStdin.
+	if recs[1].Filename != "" {
+		t.Errorf("record 1 filename = %q, want empty (stdin)", recs[1].Filename)
+	}
+	if recs[1].Data["title"] != "From stdin" {
+		t.Errorf("record 1 data.title = %v, want %q", recs[1].Data["title"], "From stdin")
+	}
+	if recs[2].Filename != b {
+		t.Errorf("record 2 filename = %q, want %q", recs[2].Filename, b)
+	}
+}
 
-	err := cmd.RunE(cmd, []string{filepath.Join(t.TempDir(), "nope.md")})
+// TestFrontmatterFilesIgnoreUnreferencedStdin documents that piped stdin is not
+// read when file arguments are given without "-".
+func TestFrontmatterFilesIgnoreUnreferencedStdin(t *testing.T) {
+	a := writeTemp(t, docA)
+	out, err := runRootCommandWithStdin(docStdin, "frontmatter", a)
+	if err != nil {
+		t.Fatalf("runRootCommandWithStdin: %v", err)
+	}
+	recs := decodeLines(t, out)
+	if len(recs) != 1 {
+		t.Fatalf("got %d records, want 1 (stdin ignored): %q", len(recs), out)
+	}
+	if recs[0].Data["title"] != "First doc" {
+		t.Errorf("data.title = %v, want %q (stdin should be ignored)", recs[0].Data["title"], "First doc")
+	}
+}
+
+func TestFrontmatterMissingFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope.md")
+	_, err := runRootCommand("frontmatter", missing)
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}
 }
 
-func TestFrontmatterCommandParseError(t *testing.T) {
-	cmd := frontmatterCmd(t)
-	cmd.SetOut(&bytes.Buffer{})
-
-	// File without a frontmatter block should surface a parse error naming the
-	// source path.
+func TestFrontmatterParseErrorNamesSource(t *testing.T) {
 	path := writeTemp(t, "no frontmatter here\n")
-	err := cmd.RunE(cmd, []string{path})
+	_, err := runRootCommand("frontmatter", path)
 	if err == nil {
 		t.Fatal("expected parse error, got nil")
 	}
