@@ -73,6 +73,10 @@ language SDKs live under `sdk/` (e.g. `sdk/typescript/`).
 - `requests.go` — Request types
 - `responses.go` — Response types
 
+### Labs / Experimental Code (`go/labs/`)
+- Experimental, unstable code with **no compatibility guarantees**; stable code (`go/cmd/*`, `go/pkg/amika`, `go/internal/*`) must **not** import from it. Holds the `akfs` CLI (`go/labs/cmd/akfs/`) and library (`go/labs/akfs/`).
+- See `go/labs/AGENTS.md` before working there.
+
 ### Other
 - `dist/` — Build output directory at the repo root (gitignored)
 - `bin/amika` — Wrapper script that auto-builds and runs `dist/amika`

@@ -1,4 +1,4 @@
-.PHONY: goenv build build-cli build-server clean test test-unit test-integration test-contract test-expensive test-all coverage vet fmt fmtcheck lint shellcheck ci setup
+.PHONY: goenv build build-cli build-server build-akfs clean test test-unit test-integration test-contract test-expensive test-all coverage vet fmt fmtcheck lint shellcheck ci setup
 
 GO_DIR = go
 UNIT_PACKAGES = $$(go -C $(GO_DIR) list ./... | grep -Ev '/test/(integration|contract)($$|/)')
@@ -19,6 +19,11 @@ build-cli: goenv
 build-server: goenv
 	mkdir -p dist
 	go -C $(GO_DIR) build -o $(CURDIR)/dist/amika-server ./cmd/amika-server
+
+# Experimental (labs) binary. Not part of the default `build` target.
+build-akfs: goenv
+	mkdir -p dist
+	go -C $(GO_DIR) build -o $(CURDIR)/dist/akfs ./labs/cmd/akfs
 
 clean:
 	rm -rf dist .gocache .gotmp .gomodcache
