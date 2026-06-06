@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/gofixpoint/amika/go/labs/akfs/frontmatter"
 	"github.com/spf13/cobra"
@@ -18,19 +20,26 @@ func init() {
 		Long: `Parse the YAML frontmatter block from one or more documents and emit
 it as JSON.
 
-Each input may be a file path; when no path is given (or the path is "-"),
-stdin is read. The document must begin with a "---" delimiter line and close
-the frontmatter with a matching "---" line. The block between is parsed as YAML
-and written to stdout as a single line of compact JSON: the parsed frontmatter
-under a "data" key, alongside a "filename" key naming the source file (omitted
-for stdin). With multiple files, one JSON line is emitted per file, in order.`,
+Each argument is a file path; the special argument "-" reads a single document
+from stdin. When no arguments are given, stdin is instead treated as a
+newline-delimited list of file paths to process (e.g. piped from "fd" or
+"find"). Each document must begin with a "---" delimiter line and close the
+frontmatter with a matching "---" line.
+
+Output is one line of compact JSON per document: the parsed frontmatter under a
+"data" key, alongside a "filename" key naming the source file (omitted when the
+document is read from stdin via "-"). With multiple inputs, one JSON line is
+emitted per document, in order.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			stdin := cmd.InOrStdin()
 
+			// No arguments: read a newline-delimited list of file paths from
+			// stdin and process each. Use "-" as an argument to parse a single
+			// document from stdin instead.
 			if len(args) == 0 {
-				return emit(enc, stdin, "")
+				return emitFileList(enc, stdin)
 			}
 			for _, arg := range args {
 				if err := emitPath(enc, stdin, arg); err != nil {
@@ -51,12 +60,35 @@ type record struct {
 	Data     map[string]any `json:"data"`
 }
 
-// emitPath parses the frontmatter of a single path ("-" meaning stdin, read
-// from stdin) and writes it as a JSON line.
+// emitFileList reads r as a newline-delimited list of file paths and emits a
+// JSON line for each. Blank lines are skipped; trailing carriage returns are
+// trimmed so lists produced on Windows are handled.
+func emitFileList(enc *json.Encoder, r io.Reader) error {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		path := strings.TrimRight(scanner.Text(), "\r")
+		if path == "" {
+			continue
+		}
+		if err := emitFile(enc, path); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
+}
+
+// emitPath parses the frontmatter of a single argument: "-" reads one document
+// from stdin, any other value is treated as a file path.
 func emitPath(enc *json.Encoder, stdin io.Reader, path string) error {
 	if path == "-" {
 		return emit(enc, stdin, "")
 	}
+	return emitFile(enc, path)
+}
+
+// emitFile parses the frontmatter of the file at path and writes it as a JSON
+// line.
+func emitFile(enc *json.Encoder, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err

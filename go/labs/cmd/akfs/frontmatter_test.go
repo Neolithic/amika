@@ -85,23 +85,70 @@ func TestFrontmatterMultipleFiles(t *testing.T) {
 	}
 }
 
-func TestFrontmatterStdin(t *testing.T) {
-	// No args, and explicit "-", both read stdin and omit the filename field.
-	for _, args := range [][]string{{"frontmatter"}, {"frontmatter", "-"}} {
-		out, err := runRootCommandWithStdin(docStdin, args...)
-		if err != nil {
-			t.Fatalf("runRootCommandWithStdin(%v): %v", args, err)
-		}
-		recs := decodeLines(t, out)
-		if len(recs) != 1 {
-			t.Fatalf("args %v: got %d records, want 1: %q", args, len(recs), out)
-		}
-		if recs[0].Filename != "" {
-			t.Errorf("args %v: filename = %q, want empty (omitted) for stdin", args, recs[0].Filename)
-		}
-		if recs[0].Data["title"] != "From stdin" {
-			t.Errorf("args %v: data.title = %v, want %q", args, recs[0].Data["title"], "From stdin")
-		}
+// TestFrontmatterStdinDocument verifies that "-" reads a single document from
+// stdin, omitting the filename field.
+func TestFrontmatterStdinDocument(t *testing.T) {
+	out, err := runRootCommandWithStdin(docStdin, "frontmatter", "-")
+	if err != nil {
+		t.Fatalf("runRootCommandWithStdin: %v", err)
+	}
+	recs := decodeLines(t, out)
+	if len(recs) != 1 {
+		t.Fatalf("got %d records, want 1: %q", len(recs), out)
+	}
+	if recs[0].Filename != "" {
+		t.Errorf("filename = %q, want empty (omitted) for stdin document", recs[0].Filename)
+	}
+	if recs[0].Data["title"] != "From stdin" {
+		t.Errorf("data.title = %v, want %q", recs[0].Data["title"], "From stdin")
+	}
+}
+
+// TestFrontmatterStdinFileList verifies that, with no arguments, stdin is read
+// as a newline-delimited list of file paths and each file is processed in
+// order. This is the `fd ... | akfs fm` use case.
+func TestFrontmatterStdinFileList(t *testing.T) {
+	a, b := writeTemp(t, docA), writeTemp(t, docB)
+	list := a + "\n" + b + "\n"
+
+	out, err := runRootCommandWithStdin(list, "frontmatter")
+	if err != nil {
+		t.Fatalf("runRootCommandWithStdin: %v", err)
+	}
+	recs := decodeLines(t, out)
+	if len(recs) != 2 {
+		t.Fatalf("got %d records, want 2: %q", len(recs), out)
+	}
+	if recs[0].Filename != a || recs[1].Filename != b {
+		t.Errorf("filenames = [%q, %q], want [%q, %q]", recs[0].Filename, recs[1].Filename, a, b)
+	}
+	if recs[0].Data["title"] != "First doc" || recs[1].Data["title"] != "Second doc" {
+		t.Errorf("titles = [%v, %v], want [First doc, Second doc]", recs[0].Data["title"], recs[1].Data["title"])
+	}
+}
+
+// TestFrontmatterStdinFileListSkipsBlankLines verifies blank lines in the file
+// list are ignored rather than treated as paths.
+func TestFrontmatterStdinFileListSkipsBlankLines(t *testing.T) {
+	a := writeTemp(t, docA)
+	list := "\n" + a + "\n\n"
+
+	out, err := runRootCommandWithStdin(list, "frontmatter")
+	if err != nil {
+		t.Fatalf("runRootCommandWithStdin: %v", err)
+	}
+	if recs := decodeLines(t, out); len(recs) != 1 || recs[0].Filename != a {
+		t.Errorf("output = %q, want single record for %q", out, a)
+	}
+}
+
+// TestFrontmatterStdinFileListMissingFile verifies a non-existent path in the
+// list surfaces an error.
+func TestFrontmatterStdinFileListMissingFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope.md")
+	_, err := runRootCommandWithStdin(missing+"\n", "frontmatter")
+	if err == nil {
+		t.Fatal("expected error for missing file in list, got nil")
 	}
 }
 
