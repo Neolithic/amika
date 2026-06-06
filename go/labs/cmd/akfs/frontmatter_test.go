@@ -26,6 +26,16 @@ func frontmatterCmd(t *testing.T) *cobra.Command {
 	return nil
 }
 
+// mustJSON returns the compact JSON encoding of v, failing the test on error.
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
+}
+
 // writeTemp writes content to a temp file and returns its path.
 func writeTemp(t *testing.T, content string) string {
 	t.Helper()
@@ -57,11 +67,12 @@ func TestFrontmatterCommandSingleFile(t *testing.T) {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 
-	if err := cmd.RunE(cmd, []string{writeTemp(t, docA)}); err != nil {
+	path := writeTemp(t, docA)
+	if err := cmd.RunE(cmd, []string{path}); err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
 
-	want := `{"data":{"tags":["a","b"],"title":"First doc"}}` + "\n"
+	want := `{"filename":` + mustJSON(t, path) + `,"data":{"tags":["a","b"],"title":"First doc"}}` + "\n"
 	if buf.String() != want {
 		t.Errorf("output = %q, want %q", buf.String(), want)
 	}
@@ -81,13 +92,18 @@ func TestFrontmatterCommandMultipleFiles(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want 2: %q", len(lines), buf.String())
 	}
-	// Each line must be a valid {"data": {...}} envelope.
+	// Each line must be a {"filename": ..., "data": {...}} envelope naming the
+	// corresponding source file, in order.
 	for i, line := range lines {
 		var env struct {
-			Data map[string]any `json:"data"`
+			Filename string         `json:"filename"`
+			Data     map[string]any `json:"data"`
 		}
 		if err := json.Unmarshal([]byte(line), &env); err != nil {
 			t.Fatalf("line %d not valid JSON: %v", i, err)
+		}
+		if env.Filename != args[i] {
+			t.Errorf("line %d filename = %q, want %q", i, env.Filename, args[i])
 		}
 		if env.Data["title"] == nil {
 			t.Errorf("line %d missing data.title: %q", i, line)
@@ -108,6 +124,7 @@ func TestFrontmatterCommandStdin(t *testing.T) {
 				t.Fatalf("RunE(%v): %v", args, err)
 			}
 		})
+		// stdin has no filename, so the field is omitted.
 		want := `{"data":{"tags":["a","b"],"title":"First doc"}}` + "\n"
 		if buf.String() != want {
 			t.Errorf("args %v: output = %q, want %q", args, buf.String(), want)
