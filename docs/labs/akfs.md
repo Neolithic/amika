@@ -1,8 +1,16 @@
 # akfs
 
-`akfs` is an experimental Amika filesystem CLI. It lives in the
-[labs subtree](README.md) and is **unstable**: commands, flags, and behavior may
-change or be removed at any time, with no compatibility guarantees.
+`afks` gives agents and humans tools for using filesystems. Computer agents
+interact primarily with files, so we treat the filesystem either:
+
+1. as the source of truth for data
+2. as a synchronized view of data from another source (ie S3 or a Postgres DB)
+
+`afks` provides tools to operate across files in a structured way, for example
+finding all YAML frontmatter from markdown files and synchronizing the
+frontmatter contents with a SQL database.
+
+`akfs` is **experimental** and the interface is **unstable**.
 
 - CLI: [`go/labs/cmd/akfs/`](../../go/labs/cmd/akfs/)
 - Library: [`go/labs/akfs/`](../../go/labs/akfs/) — import path
@@ -20,19 +28,10 @@ make build-akfs          # builds dist/akfs
 
 ## Commands
 
-### `akfs version`
-
-Print version information.
-
-```bash
-akfs version
-akfs --version
-```
-
 ### `akfs frontmatter`
 
-Parse the [YAML frontmatter](https://jekyllrb.com/docs/front-matter/) block from
-one or more documents and emit it as JSON. Aliased as `akfs fm`.
+Parse the YAML frontmatter block from one or more documents and emit it as JSON.
+Aliased as `akfs fm`.
 
 A document's frontmatter must begin on the first line with a `---` delimiter and
 end with a matching `---` (or `...`) delimiter line; the block between is parsed
@@ -51,12 +50,12 @@ slides: content/slides/components-of-a-software-factory/slides.md
 
 #### Input modes
 
-| Invocation | Behavior |
-| ---------- | -------- |
-| `akfs fm a.md b.md` | Parse each file argument, in order. |
-| `akfs fm -` | Parse a **single document** read from stdin. |
-| `akfs fm a.md - b.md` | Mix file arguments and a stdin document (`-`) in any order. |
-| `akfs fm` (no arguments) | Read stdin as a **newline-delimited list of file paths** and parse each. |
+| Invocation                  | Behavior                                                                                 |
+|-----------------------------|------------------------------------------------------------------------------------------|
+| `akfs fm a.md b.md`         | Parse each file argument, in order.                                                      |
+| `akfs fm -`                 | Parse a **single document** read from stdin.                                             |
+| `akfs fm a.md - b.md`       | Mix file arguments and a stdin document (`-`) in any order.                              |
+| `akfs fm` (no arguments)    | Read stdin as a **newline-delimited list of file paths** and parse each.                 |
 
 The two stdin modes are distinct: a bare `-` argument means "the document is on
 stdin", whereas no arguments at all means "stdin is a list of files to open"
