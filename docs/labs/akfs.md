@@ -6,9 +6,17 @@ interact primarily with files, so we treat the filesystem either:
 1. as the source of truth for data
 2. as a synchronized view of data from another source (ie S3 or a Postgres DB)
 
-`afks` provides tools to operate across files in a structured way, for example
-finding all YAML frontmatter from markdown files and synchronizing the
-frontmatter contents with a SQL database.
+`akfs` lets you treat a directory of files as structured, queryable data
+without writing a one-off script for every task. Today it focuses on the YAML
+frontmatter in markdown files: pull the frontmatter out of every file, search
+and validate it, and keep it in sync with an external store such as a SQL
+database or CMS.
+
+For example, Amika keeps an internal "company brain": a directory of markdown
+files where each blog post carries frontmatter like `published_status`,
+`author`, and `related_posts`. With `akfs` we can find posts by those fields,
+confirm every file's frontmatter is well-formed, and sync it to and from our
+CMS.
 
 `akfs` is **experimental** and the interface is **unstable**.
 
