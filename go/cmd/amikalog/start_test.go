@@ -26,6 +26,14 @@ func TestStartInstallsHooks(t *testing.T) {
 		t.Fatalf("reading settings: %v", err)
 	}
 	if !strings.Contains(string(settings), "hook --source claude") {
-		t.Errorf("settings missing amikalog hook:\n%s", settings)
+		t.Errorf("settings missing amikalog claude hook:\n%s", settings)
+	}
+
+	codexHooks, err := os.ReadFile(filepath.Join(home, ".codex", "hooks.json"))
+	if err != nil {
+		t.Fatalf("reading codex hooks.json: %v", err)
+	}
+	if !strings.Contains(string(codexHooks), "hook --source codex") {
+		t.Errorf("codex hooks.json missing amikalog codex hook:\n%s", codexHooks)
 	}
 }

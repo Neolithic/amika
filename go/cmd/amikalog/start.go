@@ -18,7 +18,7 @@ event (with git context) into the amika state directory.
 
 Writes to:
   ~/.claude/settings.json   (a hook entry for every Claude hook event)
-  ~/.codex/config.toml      (the notify program; honors $CODEX_HOME)
+  ~/.codex/hooks.json       (a hook entry for every Codex lifecycle event; honors $CODEX_HOME)
 
 Events land under:
   $AMIKA_STATE_DIRECTORY/events/{claude,codex}/sessions/
@@ -50,15 +50,13 @@ git commit and working directory it ran in. This command is idempotent.`,
 		} else {
 			fmt.Fprintf(out, "Hooks already present in %s\n", rep.ClaudeSettingsPath)
 		}
-		switch {
-		case rep.CodexConflict != "":
-			fmt.Fprintf(os.Stderr,
-				"Skipped %s: existing notify = %s does not look like amikalog; leaving it alone\n",
-				rep.CodexConfigPath, rep.CodexConflict)
-		case rep.CodexUpdated:
-			fmt.Fprintf(out, "Set notify program in %s\n", rep.CodexConfigPath)
-		default:
-			fmt.Fprintf(out, "Notify program already set in %s\n", rep.CodexConfigPath)
+		if rep.CodexUpdated {
+			fmt.Fprintf(out, "Installed hooks in %s\n", rep.CodexHooksPath)
+		} else {
+			fmt.Fprintf(out, "Hooks already present in %s\n", rep.CodexHooksPath)
+		}
+		if rep.CodexNotifyRemoved {
+			fmt.Fprintf(out, "Removed obsolete notify program from %s\n", rep.CodexConfigPath)
 		}
 		fmt.Fprintln(out, "Events will be written to:")
 		fmt.Fprintf(out, "  claude: %s\n", eventlog.EventsDir(stateDir, eventlog.SourceClaude))
@@ -90,9 +88,12 @@ elsewhere are left untouched. Already-captured events are not deleted.`,
 			fmt.Fprintf(out, "No amikalog hooks found in %s\n", rep.ClaudeSettingsPath)
 		}
 		if rep.CodexUpdated {
-			fmt.Fprintf(out, "Removed notify program from %s\n", rep.CodexConfigPath)
+			fmt.Fprintf(out, "Removed hooks from %s\n", rep.CodexHooksPath)
 		} else {
-			fmt.Fprintf(out, "No amikalog notify program found in %s\n", rep.CodexConfigPath)
+			fmt.Fprintf(out, "No amikalog hooks found in %s\n", rep.CodexHooksPath)
+		}
+		if rep.CodexNotifyRemoved {
+			fmt.Fprintf(out, "Removed obsolete notify program from %s\n", rep.CodexConfigPath)
 		}
 		return nil
 	},

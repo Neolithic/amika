@@ -140,7 +140,32 @@ func TestCaptureClaude_MalformedPayloadStillRecorded(t *testing.T) {
 	}
 }
 
-func TestCaptureCodex_DerivesSessionFromRollout(t *testing.T) {
+func TestCaptureCodex_LifecycleStdin(t *testing.T) {
+	stateDir := t.TempDir()
+	home := t.TempDir()
+	cwd := t.TempDir()
+	t.Setenv("CODEX_HOME", "")
+	// Codex lifecycle hooks deliver a Claude-shaped payload on stdin.
+	payload := `{"session_id":"codex-sess","cwd":"` + cwd + `","hook_event_name":"PreToolUse"}`
+	if err := CaptureCodex(strings.NewReader(payload), "", home, stateDir); err != nil {
+		t.Fatalf("CaptureCodex: %v", err)
+	}
+	events := readEvents(t, stateDir, SourceCodex)
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Source != SourceCodex {
+		t.Errorf("Source = %q, want codex", events[0].Source)
+	}
+	if events[0].HookEvent != "PreToolUse" {
+		t.Errorf("HookEvent = %q, want PreToolUse", events[0].HookEvent)
+	}
+	if events[0].SessionID != "codex-sess" {
+		t.Errorf("SessionID = %q, want codex-sess (from stdin payload)", events[0].SessionID)
+	}
+}
+
+func TestCaptureCodex_LegacyNotifyDerivesSessionFromRollout(t *testing.T) {
 	stateDir := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", "")
@@ -150,8 +175,9 @@ func TestCaptureCodex_DerivesSessionFromRollout(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(rolloutDir, "rollout-abc-uuid.jsonl"), "{}\n")
 
+	// Empty stdin -> falls back to the legacy notify positional argument.
 	payload := `{"type":"agent-turn-complete","turn-id":"t1"}`
-	if err := CaptureCodex(payload, home, stateDir); err != nil {
+	if err := CaptureCodex(strings.NewReader(""), payload, home, stateDir); err != nil {
 		t.Fatalf("CaptureCodex: %v", err)
 	}
 	events := readEvents(t, stateDir, SourceCodex)
@@ -163,20 +189,6 @@ func TestCaptureCodex_DerivesSessionFromRollout(t *testing.T) {
 	}
 	if events[0].SessionID != "rollout-abc-uuid" {
 		t.Errorf("SessionID = %q, want rollout-abc-uuid (derived from rollout)", events[0].SessionID)
-	}
-}
-
-func TestCaptureCodex_PayloadSessionIDWins(t *testing.T) {
-	stateDir := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("CODEX_HOME", "")
-	payload := `{"type":"agent-turn-complete","conversation_id":"conv-42"}`
-	if err := CaptureCodex(payload, home, stateDir); err != nil {
-		t.Fatalf("CaptureCodex: %v", err)
-	}
-	events := readEvents(t, stateDir, SourceCodex)
-	if len(events) != 1 || events[0].SessionID != "conv-42" {
-		t.Fatalf("SessionID = %v, want conv-42", events)
 	}
 }
 

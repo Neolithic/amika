@@ -31,10 +31,36 @@ var claudeHookEvents = []string{
 	"PreCompact",
 }
 
-// usesMatcher reports whether a Claude hook event groups its hooks by a tool
-// matcher (PreToolUse/PostToolUse) versus firing unconditionally.
-func usesMatcher(event string) bool {
-	return event == "PreToolUse" || event == "PostToolUse"
+// codexHookEvents is every Codex lifecycle hook event amikalog registers for in
+// ~/.codex/hooks.json. Codex delivers the payload on stdin with the same shape
+// as Claude (session_id, cwd, hook_event_name), so one command handles them all.
+// See https://developers.openai.com/codex/hooks.
+var codexHookEvents = []string{
+	"SessionStart",
+	"UserPromptSubmit",
+	"PreToolUse",
+	"PermissionRequest",
+	"PostToolUse",
+	"PreCompact",
+	"PostCompact",
+	"SubagentStart",
+	"SubagentStop",
+	"Stop",
+}
+
+// claudeMatcher returns the matcher for a Claude hook group. Claude matches
+// PreToolUse/PostToolUse by tool name ("*" = all); other events take no matcher.
+func claudeMatcher(event string) (string, bool) {
+	if event == "PreToolUse" || event == "PostToolUse" {
+		return "*", true
+	}
+	return "", false
+}
+
+// codexMatcher returns the matcher for a Codex hook group. Codex matchers are
+// regexes; ".*" matches every tool/source, so all events fire.
+func codexMatcher(string) (string, bool) {
+	return ".*", true
 }
 
 // HookCommand is the command Claude/Codex hooks invoke to capture events.
@@ -62,141 +88,177 @@ func (h HookCommand) ClaudeCommand() string {
 	return fmt.Sprintf("%s hook --source claude", shellQuote(h.Exe))
 }
 
-// CodexNotify returns the program-and-args list Codex's `notify` should run.
-func (h HookCommand) CodexNotify() []string {
-	return []string{h.Exe, "hook", "--source", "codex"}
+// CodexCommand returns the shell command a Codex lifecycle hook should run.
+func (h HookCommand) CodexCommand() string {
+	return fmt.Sprintf("%s hook --source codex", shellQuote(h.Exe))
+}
+
+// hookSpec describes how a source's hook entries are written into a hooks JSON
+// object and recognized for replacement/removal.
+type hookSpec struct {
+	command   string                            // shell command each hook runs
+	events    []string                          // events to register
+	matcher   func(event string) (string, bool) // optional per-event matcher
+	isManaged func(cmd string) bool             // recognizes amikalog-owned entries
+}
+
+func claudeSpec(cmd HookCommand) hookSpec {
+	return hookSpec{cmd.ClaudeCommand(), claudeHookEvents, claudeMatcher, isManagedClaudeHook}
+}
+
+func codexSpec(cmd HookCommand) hookSpec {
+	return hookSpec{cmd.CodexCommand(), codexHookEvents, codexMatcher, isManagedCodexHook}
 }
 
 // InitReport summarizes what Init (or Uninstall) did so the CLI can print
-// useful feedback.
+// useful feedback. The *Updated fields are false when nothing changed.
 type InitReport struct {
 	ClaudeSettingsPath string
-	ClaudeUpdated      bool // false when nothing changed
+	ClaudeUpdated      bool
+	CodexHooksPath     string
+	CodexUpdated       bool
 	CodexConfigPath    string
-	CodexUpdated       bool   // false when nothing changed
-	CodexConflict      string // non-empty when notify pointed elsewhere; left alone
+	CodexNotifyRemoved bool // a managed `notify` program was cleaned out of config.toml
 }
 
-// Init wires amikalog hooks into Claude Code's settings (one per hook event)
-// and a notify program into Codex's config under homeDir. The Codex side honors
-// $CODEX_HOME (see CodexHome). Init is idempotent: running it twice is a no-op.
+// Init wires amikalog hooks into Claude Code's settings and Codex's hooks.json
+// (one entry per lifecycle event), under homeDir. The Codex side honors
+// $CODEX_HOME (see CodexHome). Any managed `notify` program left in Codex's
+// config.toml (from a previous amikalog version or the removed amika capture)
+// is cleaned out, since lifecycle hooks supersede it; a third-party notify is
+// left alone. Init is idempotent: running it twice is a no-op.
 func Init(homeDir string, cmd HookCommand) (InitReport, error) {
 	rep := InitReport{
 		ClaudeSettingsPath: filepath.Join(homeDir, ".claude", "settings.json"),
+		CodexHooksPath:     CodexHooksFile(homeDir),
 		CodexConfigPath:    filepath.Join(CodexHome(homeDir), "config.toml"),
 	}
 
-	claudeUpdated, err := ensureClaudeHooks(rep.ClaudeSettingsPath, cmd.ClaudeCommand())
+	claudeUpdated, err := ensureHooks(rep.ClaudeSettingsPath, claudeSpec(cmd))
 	if err != nil {
 		return rep, err
 	}
 	rep.ClaudeUpdated = claudeUpdated
 
-	codexUpdated, conflict, err := ensureCodexNotify(rep.CodexConfigPath, cmd.CodexNotify())
+	codexUpdated, err := ensureHooks(rep.CodexHooksPath, codexSpec(cmd))
 	if err != nil {
 		return rep, err
 	}
 	rep.CodexUpdated = codexUpdated
-	rep.CodexConflict = conflict
+
+	notifyRemoved, err := removeCodexNotify(rep.CodexConfigPath)
+	if err != nil {
+		return rep, err
+	}
+	rep.CodexNotifyRemoved = notifyRemoved
 
 	return rep, nil
 }
 
-// Uninstall removes amikalog hooks from Claude Code's settings and the Codex
-// notify program, leaving unrelated entries untouched. Its InitReport reuses
-// the *Updated fields to report whether anything was removed.
+// Uninstall removes amikalog hooks from Claude Code's settings and Codex's
+// hooks.json, and cleans out any managed Codex `notify` program, leaving
+// unrelated entries untouched. Its InitReport reuses the *Updated fields to
+// report whether anything was removed.
 func Uninstall(homeDir string) (InitReport, error) {
 	rep := InitReport{
 		ClaudeSettingsPath: filepath.Join(homeDir, ".claude", "settings.json"),
+		CodexHooksPath:     CodexHooksFile(homeDir),
 		CodexConfigPath:    filepath.Join(CodexHome(homeDir), "config.toml"),
 	}
 
-	claudeUpdated, err := removeClaudeHooks(rep.ClaudeSettingsPath)
+	claudeUpdated, err := removeManagedHooks(rep.ClaudeSettingsPath, claudeHookEvents, isManagedClaudeHook)
 	if err != nil {
 		return rep, err
 	}
 	rep.ClaudeUpdated = claudeUpdated
 
-	codexUpdated, err := removeCodexNotify(rep.CodexConfigPath)
+	codexUpdated, err := removeManagedHooks(rep.CodexHooksPath, codexHookEvents, isManagedCodexHook)
 	if err != nil {
 		return rep, err
 	}
 	rep.CodexUpdated = codexUpdated
 
+	notifyRemoved, err := removeCodexNotify(rep.CodexConfigPath)
+	if err != nil {
+		return rep, err
+	}
+	rep.CodexNotifyRemoved = notifyRemoved
+
 	return rep, nil
 }
 
-// ensureClaudeHooks reads the settings file, makes every event in
-// claudeHookEvents run command exactly once, and writes the file back. Prior
-// amikalog entries are stripped first (recognized by argv shape, not exact
-// string) so re-running from a different executable path replaces stale entries
-// rather than appending duplicates. Returns whether the file changed.
+// ensureHooks reads a hooks JSON object (Claude's settings.json or Codex's
+// hooks.json — same `{"hooks": {Event: [{matcher?, hooks: [...]}]}}` shape) and
+// makes every event in spec run spec.command exactly once, writing the file
+// back. Prior amikalog entries are stripped first (recognized by argv shape,
+// not exact string) so re-running from a different executable path replaces
+// stale entries rather than appending duplicates. Unrelated keys and hooks
+// round-trip unchanged. Returns whether the file changed.
 //
-// The Claude hooks schema is documented at
-// https://docs.claude.com/en/docs/claude-code/hooks. It is modeled as nested
-// map[string]interface{} so unrelated keys round-trip unchanged.
-func ensureClaudeHooks(path, command string) (bool, error) {
-	settings, err := readJSONObject(path)
+// Schemas: https://docs.claude.com/en/docs/claude-code/hooks and
+// https://developers.openai.com/codex/hooks.
+func ensureHooks(path string, spec hookSpec) (bool, error) {
+	obj, err := readJSONObject(path)
 	if err != nil {
 		return false, err
 	}
-	before, err := json.Marshal(settings)
+	before, err := json.Marshal(obj)
 	if err != nil {
 		return false, fmt.Errorf("encoding %s: %w", path, err)
 	}
 
-	hooks, _ := settings["hooks"].(map[string]interface{})
+	hooks, _ := obj["hooks"].(map[string]interface{})
 	if hooks == nil {
 		hooks = map[string]interface{}{}
 	}
-	for _, event := range claudeHookEvents {
+	for _, event := range spec.events {
 		groups, _ := hooks[event].([]interface{})
-		filtered, _ := stripAmikalogHooks(groups)
+		filtered, _ := stripManagedHooks(groups, spec.isManaged)
 		group := map[string]interface{}{
 			"hooks": []interface{}{
-				map[string]interface{}{"type": "command", "command": command},
+				map[string]interface{}{"type": "command", "command": spec.command},
 			},
 		}
-		if usesMatcher(event) {
-			group["matcher"] = "*"
+		if m, ok := spec.matcher(event); ok {
+			group["matcher"] = m
 		}
 		hooks[event] = append(filtered, group)
 	}
-	settings["hooks"] = hooks
+	obj["hooks"] = hooks
 
-	after, err := json.Marshal(settings)
+	after, err := json.Marshal(obj)
 	if err != nil {
 		return false, fmt.Errorf("encoding %s: %w", path, err)
 	}
 	if bytes.Equal(before, after) {
 		return false, nil
 	}
-	return true, writeJSONObject(path, settings)
+	return true, writeJSONObject(path, obj)
 }
 
-// removeClaudeHooks strips every amikalog entry from all hook events, dropping
-// events (and the hooks object) that become empty. Returns whether anything
+// removeManagedHooks strips every amikalog entry from the given events, dropping
+// events (and the hooks object) that become empty. Returns whether the file
 // changed.
-func removeClaudeHooks(path string) (bool, error) {
-	settings, err := readJSONObject(path)
+func removeManagedHooks(path string, events []string, isManaged func(string) bool) (bool, error) {
+	obj, err := readJSONObject(path)
 	if err != nil {
 		return false, err
 	}
-	hooks, _ := settings["hooks"].(map[string]interface{})
+	hooks, _ := obj["hooks"].(map[string]interface{})
 	if hooks == nil {
 		return false, nil
 	}
-	before, err := json.Marshal(settings)
+	before, err := json.Marshal(obj)
 	if err != nil {
 		return false, fmt.Errorf("encoding %s: %w", path, err)
 	}
 
-	for _, event := range claudeHookEvents {
+	for _, event := range events {
 		groups, _ := hooks[event].([]interface{})
 		if groups == nil {
 			continue
 		}
-		filtered, _ := stripAmikalogHooks(groups)
+		filtered, _ := stripManagedHooks(groups, isManaged)
 		if len(filtered) == 0 {
 			delete(hooks, event)
 		} else {
@@ -204,25 +266,25 @@ func removeClaudeHooks(path string) (bool, error) {
 		}
 	}
 	if len(hooks) == 0 {
-		delete(settings, "hooks")
+		delete(obj, "hooks")
 	} else {
-		settings["hooks"] = hooks
+		obj["hooks"] = hooks
 	}
 
-	after, err := json.Marshal(settings)
+	after, err := json.Marshal(obj)
 	if err != nil {
 		return false, fmt.Errorf("encoding %s: %w", path, err)
 	}
 	if bytes.Equal(before, after) {
 		return false, nil
 	}
-	return true, writeJSONObject(path, settings)
+	return true, writeJSONObject(path, obj)
 }
 
-// stripAmikalogHooks returns the input hook groups with every amikalog-installed
-// entry removed (groups that become empty are dropped), plus the raw command
-// strings of the entries that were removed.
-func stripAmikalogHooks(groups []interface{}) ([]interface{}, []string) {
+// stripManagedHooks returns the input hook groups with every entry matched by
+// isManaged removed (groups that become empty are dropped), plus the raw
+// command strings of the entries that were removed.
+func stripManagedHooks(groups []interface{}, isManaged func(string) bool) ([]interface{}, []string) {
 	filtered := make([]interface{}, 0, len(groups))
 	var removed []string
 	for _, raw := range groups {
@@ -240,7 +302,7 @@ func stripAmikalogHooks(groups []interface{}) ([]interface{}, []string) {
 				continue
 			}
 			cmd, _ := entry["command"].(string)
-			if isManagedClaudeHook(cmd) {
+			if isManaged(cmd) {
 				removed = append(removed, cmd)
 				continue
 			}
@@ -275,6 +337,12 @@ func looksLikeAmikalogClaudeHook(cmd string) bool {
 // `amika sessions capture --source claude` Stop hook that amikalog replaces.
 func looksLikeLegacyAmikaCaptureHook(cmd string) bool {
 	return matchesHookArgv(cmd, "amika", []string{"sessions", "capture", "--source", "claude"})
+}
+
+// isManagedCodexHook reports whether a Codex hooks.json command is amikalog's
+// own capture entry (and thus may be replaced/removed).
+func isManagedCodexHook(cmd string) bool {
+	return matchesHookArgv(cmd, binaryName, []string{"hook", "--source", "codex"})
 }
 
 // matchesHookArgv reports whether cmd is a single command whose argv[0] has the
@@ -370,48 +438,9 @@ func writeJSONObject(path string, obj map[string]interface{}) error {
 	return writeFileAtomic(path, encoded)
 }
 
-// ensureCodexNotify ensures Codex's top-level `notify` array invokes argv,
-// editing line-wise so comments and formatting survive. Returns:
-//   - updated: true when the file was modified
-//   - conflict: a description of an existing non-amikalog notify value, in which
-//     case no changes are made
-func ensureCodexNotify(path string, argv []string) (updated bool, conflict string, err error) {
-	want := formatCodexNotify(argv)
-
-	data, readErr := os.ReadFile(path)
-	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-		return false, "", fmt.Errorf("reading %s: %w", path, readErr)
-	}
-
-	lines := splitLines(string(data))
-	start, end, existing := findTopLevelNotify(lines)
-
-	if start >= 0 {
-		if existing == want {
-			return false, "", nil
-		}
-		if !codexNotifyIsManaged(existing) {
-			return false, existing, nil
-		}
-		replaced := append([]string{}, lines[:start]...)
-		replaced = append(replaced, "notify = "+want)
-		lines = append(replaced, lines[end+1:]...)
-	} else {
-		lines = insertCodexNotify(lines, "notify = "+want)
-	}
-
-	out := strings.Join(lines, "\n")
-	if !strings.HasSuffix(out, "\n") {
-		out += "\n"
-	}
-	if err := writeFileAtomic(path, []byte(out)); err != nil {
-		return false, "", err
-	}
-	return true, "", nil
-}
-
-// removeCodexNotify deletes a top-level amikalog `notify` assignment. It leaves
-// a notify pointing elsewhere untouched. Returns whether the file changed.
+// removeCodexNotify deletes a top-level managed `notify` assignment (amikalog's
+// own, or the deprecated amika sessions-capture program). A notify pointing
+// elsewhere is left untouched. Returns whether the file changed.
 func removeCodexNotify(path string) (bool, error) {
 	data, readErr := os.ReadFile(path)
 	if readErr != nil {
@@ -463,15 +492,6 @@ func writeFileAtomic(path string, data []byte) error {
 	}
 	tmpPath = ""
 	return nil
-}
-
-func formatCodexNotify(argv []string) string {
-	parts := make([]string, len(argv))
-	for i, a := range argv {
-		b, _ := json.Marshal(a) // JSON strings are valid TOML basic strings
-		parts[i] = string(b)
-	}
-	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 // splitLines splits on '\n' while dropping a single trailing empty element so a
@@ -587,25 +607,6 @@ func tomlArrayDecode(value string, dst *[]string) error {
 	}
 	*dst = holder.X
 	return nil
-}
-
-func insertCodexNotify(lines []string, assignment string) []string {
-	// Insert before the first [section] header so the assignment is top-level.
-	for i, raw := range lines {
-		if strings.HasPrefix(strings.TrimSpace(raw), "[") {
-			head := append([]string{}, lines[:i]...)
-			if len(head) > 0 && head[len(head)-1] != "" {
-				head = append(head, "")
-			}
-			head = append(head, assignment, "")
-			return append(head, lines[i:]...)
-		}
-	}
-	// No section headers — append, separating from existing content.
-	if len(lines) > 0 && lines[len(lines)-1] != "" {
-		lines = append(lines, "")
-	}
-	return append(lines, assignment)
 }
 
 // shellQuote wraps s in single quotes if it contains characters /bin/sh would

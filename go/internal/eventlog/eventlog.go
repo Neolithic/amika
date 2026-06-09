@@ -2,11 +2,12 @@
 // append-only events under the amika state directory, annotating every event
 // with the git state of the directory the hook fired in.
 //
-// Capture is driven by the agents themselves: Init writes hook entries into
-// ~/.claude/settings.json (one per Claude hook event) and
-// <codex-home>/config.toml (the notify program) that invoke
-// `amikalog hook --source ...` on every hook call. Each invocation appends one
-// JSON file:
+// Capture is driven by the agents themselves: Init writes lifecycle hook
+// entries into ~/.claude/settings.json and <codex-home>/hooks.json (one per
+// hook event) that invoke `amikalog hook --source ...` on every hook call.
+// Both agents deliver the hook payload on stdin with the same shape
+// (session_id, cwd, hook_event_name, ...). Each invocation appends one JSON
+// file:
 //
 //	<state>/events/<source>/sessions/<ts>_<session-id>/event_<seq>_<ts>.json
 //
@@ -14,7 +15,9 @@
 // same one the rest of amika uses (see internal/config.StateDir), so
 // AMIKA_STATE_DIRECTORY and the XDG variables apply.
 //
-// <codex-home> is $CODEX_HOME when set, otherwise ~/.codex (see CodexHome).
+// <codex-home> is $CODEX_HOME when set, otherwise ~/.codex (see CodexHome). For
+// backward compatibility CaptureCodex also accepts the legacy Codex `notify`
+// payload (passed as a positional argument rather than on stdin).
 package eventlog
 
 import (
@@ -43,9 +46,10 @@ func EventsDir(stateDir string, src Source) string {
 	return filepath.Join(stateDir, "events", string(src), "sessions")
 }
 
-// claudeHookInput is the subset of Claude Code's hook stdin JSON that amikalog
-// consumes to label the event. The full payload is preserved verbatim.
-type claudeHookInput struct {
+// hookInput is the subset of a lifecycle hook's stdin JSON that amikalog
+// consumes to label an event. Claude Code and Codex share these field names.
+// The full payload is preserved verbatim regardless.
+type hookInput struct {
 	SessionID     string `json:"session_id"`
 	CWD           string `json:"cwd"`
 	HookEventName string `json:"hook_event_name"`
@@ -59,16 +63,38 @@ func CaptureClaude(stdin io.Reader, stateDir string) error {
 	if err != nil {
 		return fmt.Errorf("reading claude hook stdin: %w", err)
 	}
-	var in claudeHookInput
-	// Tolerate malformed/empty stdin: still record what we received.
-	_ = json.Unmarshal(data, &in)
+	return captureLifecycle(SourceClaude, data, stateDir)
+}
 
+// CaptureCodex appends an event for a Codex hook invocation. Codex lifecycle
+// hooks deliver the payload on stdin with the same shape as Claude, so that is
+// the primary path. As a backward-compatibility fallback for the deprecated
+// Codex `notify` program (which passes its payload as a positional argument and
+// includes no session id), an empty stdin falls back to legacyArg, deriving the
+// session id from the most recently modified rollout file.
+func CaptureCodex(stdin io.Reader, legacyArg, homeDir, stateDir string) error {
+	data, err := io.ReadAll(stdin)
+	if err != nil {
+		return fmt.Errorf("reading codex hook stdin: %w", err)
+	}
+	if len(bytesTrimSpace(data)) > 0 {
+		return captureLifecycle(SourceCodex, data, stateDir)
+	}
+	return captureCodexNotify(legacyArg, homeDir, stateDir)
+}
+
+// captureLifecycle records an event from a lifecycle-hook stdin payload (shared
+// by Claude and Codex). Malformed or empty JSON is tolerated: the event is
+// still written with whatever fields parsed and the raw payload preserved.
+func captureLifecycle(src Source, data []byte, stateDir string) error {
+	var in hookInput
+	_ = json.Unmarshal(data, &in)
 	cwd := in.CWD
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
 	return writeEvent(stateDir, Event{
-		Source:    SourceClaude,
+		Source:    src,
 		HookEvent: in.HookEventName,
 		SessionID: in.SessionID,
 		CWD:       cwd,
@@ -77,9 +103,9 @@ func CaptureClaude(stdin io.Reader, stateDir string) error {
 	})
 }
 
-// codexNotifyInput is the subset of Codex's notify payload amikalog reads.
-// Codex does not include a session id, so several plausible field names are
-// accepted and CaptureCodex derives one when none is present.
+// codexNotifyInput is the subset of Codex's legacy notify payload amikalog
+// reads. notify carries no session id, so several plausible field names are
+// accepted and captureCodexNotify derives one when none is present.
 type codexNotifyInput struct {
 	Type           string `json:"type"`
 	SessionID      string `json:"session_id"`
@@ -98,14 +124,9 @@ func (in codexNotifyInput) sessionID() string {
 	return ""
 }
 
-// CaptureCodex appends an event for a Codex notify invocation. Codex passes its
-// payload as a single positional argument (arg) and runs in the repository's
-// working directory, so git context is gathered from the process cwd.
-//
-// Because Codex's notify payload carries no session id, the id is taken from
-// the payload when present, otherwise derived from the most recently modified
-// rollout file under <codex-home>/sessions (see deriveCodexSessionID).
-func CaptureCodex(arg, homeDir, stateDir string) error {
+// captureCodexNotify records an event from a legacy Codex `notify` payload
+// (passed as a positional argument), running in the repo's working directory.
+func captureCodexNotify(arg, homeDir, stateDir string) error {
 	data := []byte(arg)
 	var in codexNotifyInput
 	_ = json.Unmarshal(data, &in)
@@ -126,13 +147,25 @@ func CaptureCodex(arg, homeDir, stateDir string) error {
 	})
 }
 
-// CodexHome returns the directory Codex uses for config, sessions and related
-// state. It honors $CODEX_HOME, falling back to <homeDir>/.codex.
+// bytesTrimSpace reports the input with leading/trailing ASCII whitespace
+// removed, used only to decide whether stdin carried a payload.
+func bytesTrimSpace(b []byte) []byte {
+	return []byte(strings.TrimSpace(string(b)))
+}
+
+// CodexHome returns the directory Codex uses for config, sessions, hooks and
+// related state. It honors $CODEX_HOME, falling back to <homeDir>/.codex.
 func CodexHome(homeDir string) string {
 	if v := os.Getenv("CODEX_HOME"); v != "" {
 		return v
 	}
 	return filepath.Join(homeDir, ".codex")
+}
+
+// CodexHooksFile returns the path to Codex's auto-loaded lifecycle hooks file
+// (hooks.json) under homeDir's Codex home.
+func CodexHooksFile(homeDir string) string {
+	return filepath.Join(CodexHome(homeDir), "hooks.json")
 }
 
 // deriveCodexSessionID returns a stable session identifier for the Codex

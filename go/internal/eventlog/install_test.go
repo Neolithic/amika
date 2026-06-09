@@ -12,19 +12,45 @@ func testCommand() HookCommand {
 	return HookCommand{Exe: "/opt/bin/amikalog"}
 }
 
-// readClaudeHooks returns the parsed "hooks" object from a settings file.
-func readClaudeHooks(t *testing.T, path string) map[string]interface{} {
+// readHooks returns the parsed "hooks" object from a hooks JSON file (Claude
+// settings.json or Codex hooks.json).
+func readHooks(t *testing.T, path string) map[string]interface{} {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading %s: %v", path, err)
 	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
+	var obj map[string]interface{}
+	if err := json.Unmarshal(data, &obj); err != nil {
 		t.Fatalf("parsing %s: %v", path, err)
 	}
-	hooks, _ := settings["hooks"].(map[string]interface{})
+	hooks, _ := obj["hooks"].(map[string]interface{})
 	return hooks
+}
+
+// assertHookEntries verifies every event runs wantCmd exactly once, carrying a
+// matcher exactly when matcher(event) says it should.
+func assertHookEntries(t *testing.T, hooks map[string]interface{}, events []string, wantCmd string, matcher func(string) (string, bool)) {
+	t.Helper()
+	for _, event := range events {
+		groups, ok := hooks[event].([]interface{})
+		if !ok || len(groups) == 0 {
+			t.Fatalf("event %s missing from hooks", event)
+		}
+		group := groups[len(groups)-1].(map[string]interface{})
+		gotMatcher, hasMatcher := group["matcher"]
+		wantVal, wantMatcher := matcher(event)
+		switch {
+		case wantMatcher && gotMatcher != wantVal:
+			t.Errorf("event %s matcher = %v, want %q", event, gotMatcher, wantVal)
+		case !wantMatcher && hasMatcher:
+			t.Errorf("event %s should not carry a matcher, got %v", event, gotMatcher)
+		}
+		entry := group["hooks"].([]interface{})[0].(map[string]interface{})
+		if entry["command"] != wantCmd {
+			t.Errorf("event %s command = %v, want %q", event, entry["command"], wantCmd)
+		}
+	}
 }
 
 func TestInit_InstallsEveryClaudeEvent(t *testing.T) {
@@ -38,27 +64,25 @@ func TestInit_InstallsEveryClaudeEvent(t *testing.T) {
 		t.Error("ClaudeUpdated = false, want true on first install")
 	}
 
-	hooks := readClaudeHooks(t, rep.ClaudeSettingsPath)
-	wantCmd := testCommand().ClaudeCommand()
-	for _, event := range claudeHookEvents {
-		groups, ok := hooks[event].([]interface{})
-		if !ok || len(groups) == 0 {
-			t.Fatalf("event %s missing from settings", event)
-		}
-		group := groups[len(groups)-1].(map[string]interface{})
-		if usesMatcher(event) {
-			if group["matcher"] != "*" {
-				t.Errorf("event %s matcher = %v, want *", event, group["matcher"])
-			}
-		} else if _, has := group["matcher"]; has {
-			t.Errorf("event %s should not carry a matcher", event)
-		}
-		entries := group["hooks"].([]interface{})
-		entry := entries[0].(map[string]interface{})
-		if entry["command"] != wantCmd {
-			t.Errorf("event %s command = %v, want %q", event, entry["command"], wantCmd)
-		}
+	hooks := readHooks(t, rep.ClaudeSettingsPath)
+	assertHookEntries(t, hooks, claudeHookEvents, testCommand().ClaudeCommand(), claudeMatcher)
+}
+
+func TestInit_InstallsEveryCodexEvent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", "")
+	rep, err := Init(home, testCommand())
+	if err != nil {
+		t.Fatalf("Init: %v", err)
 	}
+	if !rep.CodexUpdated {
+		t.Error("CodexUpdated = false, want true on first install")
+	}
+	if rep.CodexHooksPath != filepath.Join(home, ".codex", "hooks.json") {
+		t.Errorf("CodexHooksPath = %q, want ~/.codex/hooks.json", rep.CodexHooksPath)
+	}
+	hooks := readHooks(t, rep.CodexHooksPath)
+	assertHookEntries(t, hooks, codexHookEvents, testCommand().CodexCommand(), codexMatcher)
 }
 
 func TestInit_Idempotent(t *testing.T) {
@@ -68,9 +92,9 @@ func TestInit_Idempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
-	configPath := filepath.Join(CodexHome(home), "config.toml")
+	hooksPath := CodexHooksFile(home)
 	before := readFile(t, settingsPath)
-	beforeCfg := readFile(t, configPath)
+	beforeHooks := readFile(t, hooksPath)
 
 	rep, err := Init(home, testCommand())
 	if err != nil {
@@ -85,8 +109,8 @@ func TestInit_Idempotent(t *testing.T) {
 	if after := readFile(t, settingsPath); after != before {
 		t.Errorf("settings changed on re-run:\nbefore=%s\nafter=%s", before, after)
 	}
-	if after := readFile(t, configPath); after != beforeCfg {
-		t.Errorf("codex config changed on re-run:\nbefore=%s\nafter=%s", beforeCfg, after)
+	if after := readFile(t, hooksPath); after != beforeHooks {
+		t.Errorf("codex hooks.json changed on re-run:\nbefore=%s\nafter=%s", beforeHooks, after)
 	}
 }
 
@@ -142,20 +166,7 @@ func TestInit_ReplacesStaleAmikalogExe(t *testing.T) {
 	}
 }
 
-func TestInit_CodexNotify(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("CODEX_HOME", "")
-	rep, err := Init(home, testCommand())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg := readFile(t, rep.CodexConfigPath)
-	if !strings.Contains(cfg, `notify = ["/opt/bin/amikalog", "hook", "--source", "codex"]`) {
-		t.Errorf("codex config missing amikalog notify:\n%s", cfg)
-	}
-}
-
-func TestInit_CodexNotifyConflictLeftAlone(t *testing.T) {
+func TestInit_LeavesThirdPartyCodexNotify(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", "")
 	configPath := filepath.Join(CodexHome(home), "config.toml")
@@ -168,14 +179,15 @@ func TestInit_CodexNotifyConflictLeftAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.CodexConflict == "" {
-		t.Error("expected CodexConflict to be reported")
-	}
-	if rep.CodexUpdated {
-		t.Error("CodexUpdated = true, want false when leaving a conflicting notify alone")
+	if rep.CodexNotifyRemoved {
+		t.Error("CodexNotifyRemoved = true, want false: a third-party notify must be left alone")
 	}
 	if cfg := readFile(t, configPath); !strings.Contains(cfg, "/usr/bin/other") {
-		t.Errorf("conflicting notify was overwritten:\n%s", cfg)
+		t.Errorf("third-party notify was modified:\n%s", cfg)
+	}
+	// Lifecycle hooks are still installed regardless of the notify program.
+	if hooks := readHooks(t, rep.CodexHooksPath); len(hooks) == 0 {
+		t.Error("codex hooks.json was not written")
 	}
 }
 
@@ -191,17 +203,17 @@ func TestUninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !rep.ClaudeUpdated {
-		t.Error("ClaudeUpdated = false, want true (hooks should be removed)")
+		t.Error("ClaudeUpdated = false, want true (claude hooks should be removed)")
 	}
 	if !rep.CodexUpdated {
-		t.Error("CodexUpdated = false, want true (notify should be removed)")
+		t.Error("CodexUpdated = false, want true (codex hooks should be removed)")
 	}
 
-	if hooks := readClaudeHooks(t, rep.ClaudeSettingsPath); len(hooks) != 0 {
-		t.Errorf("hooks remain after uninstall: %v", hooks)
+	if hooks := readHooks(t, rep.ClaudeSettingsPath); len(hooks) != 0 {
+		t.Errorf("claude hooks remain after uninstall: %v", hooks)
 	}
-	if cfg := readFile(t, rep.CodexConfigPath); strings.Contains(cfg, "amikalog") {
-		t.Errorf("notify remains after uninstall:\n%s", cfg)
+	if hooks := readHooks(t, rep.CodexHooksPath); len(hooks) != 0 {
+		t.Errorf("codex hooks remain after uninstall: %v", hooks)
 	}
 
 	// Second uninstall is a no-op.
@@ -272,18 +284,15 @@ func TestInit_MigratesLegacyCodexNotify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.CodexConflict != "" {
-		t.Errorf("legacy amika notify reported as conflict: %q", rep.CodexConflict)
+	if !rep.CodexNotifyRemoved {
+		t.Error("CodexNotifyRemoved = false, want true: the obsolete amika notify should be cleaned out")
 	}
-	if !rep.CodexUpdated {
-		t.Error("CodexUpdated = false, want true when migrating legacy notify")
+	if cfg := readFile(t, configPath); strings.Contains(cfg, "notify") {
+		t.Errorf("obsolete amika notify was not removed from config.toml:\n%s", cfg)
 	}
-	cfg := readFile(t, configPath)
-	if strings.Contains(cfg, "sessions") {
-		t.Errorf("legacy amika notify was not migrated:\n%s", cfg)
-	}
-	if !strings.Contains(cfg, `notify = ["/opt/bin/amikalog", "hook", "--source", "codex"]`) {
-		t.Errorf("amikalog notify not installed after migration:\n%s", cfg)
+	// Lifecycle hooks take over from the removed notify program.
+	if hooks := readHooks(t, rep.CodexHooksPath); len(hooks) == 0 {
+		t.Error("codex hooks.json was not written")
 	}
 }
 

@@ -36,9 +36,24 @@ func TestHook_Claude_WritesEvent(t *testing.T) {
 	}
 }
 
-// TestHook_Codex_AcceptsNotifyPayload guards against re-introducing
-// cobra.NoArgs on the hook command: Codex's notify hook appends one trailing
-// JSON payload to the configured argv, so the command must accept it.
+func TestHook_Codex_WritesEventFromStdin(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("AMIKA_STATE_DIRECTORY", stateDir)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+
+	payload := `{"session_id":"cdx","cwd":"` + t.TempDir() + `","hook_event_name":"PreToolUse"}`
+	if _, err := runRootCommandStdin(strings.NewReader(payload), "hook", "--source", "codex"); err != nil {
+		t.Fatalf("hook --source codex (stdin): %v", err)
+	}
+	if got := countEventFiles(t, filepath.Join(stateDir, "events", "codex")); got != 1 {
+		t.Fatalf("got %d codex event files, want 1", got)
+	}
+}
+
+// TestHook_Codex_AcceptsNotifyPayload guards the legacy fallback: the
+// deprecated Codex notify program appends one trailing JSON payload to the
+// configured argv (with empty stdin), so the command must still accept it.
 func TestHook_Codex_AcceptsNotifyPayload(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("AMIKA_STATE_DIRECTORY", stateDir)
