@@ -65,7 +65,6 @@ language SDKs live under `sdk/` (e.g. `sdk/typescript/`).
 - `main.go` — Entry point, root Cobra command
 - `start.go` — `start` / `stop` commands that install/remove the agent hooks
 - `hook.go` — `hook --source claude|codex`, the hook entrypoint that records one event
-- `push.go` — `push` command (stub; remote upload not yet implemented)
 
 ### Internal Packages (`go/internal/`)
 - `sandbox/` — Docker sandbox management, preset image resolution + auto-build, volume and file mount stores, random name generation
