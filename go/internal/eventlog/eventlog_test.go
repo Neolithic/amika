@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -60,10 +61,8 @@ func TestCaptureClaude_SecondEventSameSessionIncrementsSeq(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root := EventsDir(stateDir, SourceClaude)
-	sessionDirs, _ := os.ReadDir(root)
-	if len(sessionDirs) != 1 {
-		t.Fatalf("got %d session dirs, want 1 (events must share a session dir)", len(sessionDirs))
+	if got := countSessionDirs(t, stateDir, SourceClaude); got != 1 {
+		t.Fatalf("got %d session dirs, want 1 (events must share a session dir)", got)
 	}
 	events := readEvents(t, stateDir, SourceClaude)
 	if len(events) != 2 {
@@ -75,6 +74,53 @@ func TestCaptureClaude_SecondEventSameSessionIncrementsSeq(t *testing.T) {
 	}
 	if !seqs[0] || !seqs[1] {
 		t.Errorf("expected seq 0 and 1, got %v", seqs)
+	}
+}
+
+func TestCaptureClaude_ConcurrentSameSessionUniqueSeqs(t *testing.T) {
+	stateDir := t.TempDir()
+	cwd := t.TempDir() // non-repo: keep git lookups cheap and deterministic
+	const n = 25
+
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			payload := `{"session_id":"race","cwd":"` + cwd + `","hook_event_name":"PostToolUse"}`
+			if err := CaptureClaude(strings.NewReader(payload), stateDir); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent CaptureClaude: %v", err)
+	}
+
+	// All events must land in one session directory...
+	if got := countSessionDirs(t, stateDir, SourceClaude); got != 1 {
+		t.Fatalf("got %d session dirs, want 1 (session-dir creation must be serialized)", got)
+	}
+
+	// ...with exactly the contiguous seqs 0..n-1, none duplicated.
+	events := readEvents(t, stateDir, SourceClaude)
+	if len(events) != n {
+		t.Fatalf("got %d events, want %d", len(events), n)
+	}
+	seen := make(map[int]bool, n)
+	for _, ev := range events {
+		if seen[ev.Seq] {
+			t.Fatalf("duplicate seq %d across concurrent hooks", ev.Seq)
+		}
+		seen[ev.Seq] = true
+	}
+	for i := 0; i < n; i++ {
+		if !seen[i] {
+			t.Errorf("missing seq %d", i)
+		}
 	}
 }
 
@@ -167,6 +213,23 @@ func readEvents(t *testing.T, stateDir string, src Source) []Event {
 		}
 	}
 	return events
+}
+
+// countSessionDirs returns the number of session directories for src (ignoring
+// the .lock file and any other non-directory entries).
+func countSessionDirs(t *testing.T, stateDir string, src Source) int {
+	t.Helper()
+	entries, err := os.ReadDir(EventsDir(stateDir, src))
+	if err != nil {
+		t.Fatalf("reading sessions dir: %v", err)
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			n++
+		}
+	}
+	return n
 }
 
 func writeFile(t *testing.T, path, content string) {

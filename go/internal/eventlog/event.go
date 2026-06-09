@@ -70,15 +70,32 @@ func rawPayload(data []byte) json.RawMessage {
 // <stateDir>/events/<source>/sessions/<ts>_<session-id>/event_<seq>_<ts>.json.
 //
 // Writes are append-only: a new file is created for every call and existing
-// files are never modified. The sequence number is derived from the count of
-// events already in the session directory; on a name collision (concurrent
-// hooks racing for the same seq) the seq is bumped and the create retried, so
-// no event is ever clobbered.
+// files are never modified.
+//
+// Concurrent hooks for the same session run as separate processes — Claude
+// fires PostToolUse hooks in parallel for parallel tool calls — so an
+// in-process mutex would not help. A cross-process advisory lock on the
+// source's sessions directory makes the whole "resolve session dir → count
+// existing events → create the next file" critical section atomic. Without it
+// two processes could read the same event count and, because each filename
+// carries its own timestamp, write distinct files with the same Seq. Locking at
+// the sessions-root level also serializes session-directory creation, so two
+// first-hooks of a brand-new session cannot create two directories for it.
 func writeEvent(stateDir string, ev Event) error {
 	now := time.Now().UTC()
 	ev.Timestamp = now.Format(time.RFC3339Nano)
 
 	root := EventsDir(stateDir, ev.Source)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return fmt.Errorf("creating events dir %s: %w", root, err)
+	}
+
+	lock, err := acquireLock(filepath.Join(root, lockFileName))
+	if err != nil {
+		return err
+	}
+	defer lock.release()
+
 	sessionDir, err := resolveSessionDir(root, ev.SessionID, now)
 	if err != nil {
 		return err
