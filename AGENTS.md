@@ -9,7 +9,7 @@ commands with `go -C go ...`, so `make` targets continue to work
 unchanged from the repo root. Build outputs are written to `dist/` at
 the repo root.
 
-**Use `make build` to build all binaries, or `make build-cli` / `make build-server` / `make build-amikalog` for one binary.** If you run `go build` directly, do it from the `go/` directory and write outputs to the repo-root `dist/`:
+**Use `make build` to build all binaries (`amika`, `amika-server`, `amikalog`, and the experimental `akfs`), or `make build-cli` / `make build-server` / `make build-amikalog` / `make build-akfs` for one binary.** If you run `go build` directly, do it from the `go/` directory and write outputs to the repo-root `dist/`:
 
 ```bash
 (cd go && go build -o ../dist/amika ./cmd/amika)
@@ -25,10 +25,11 @@ make setup
 make ci
 
 # Individual targets
-make build          # builds dist/amika, dist/amika-server, dist/amikalog
+make build          # builds dist/amika, dist/amika-server, dist/amikalog, dist/akfs
 make build-cli      # builds dist/amika
 make build-server   # builds dist/amika-server
 make build-amikalog # builds dist/amikalog
+make build-akfs     # builds dist/akfs (experimental, labs)
 make test    # go test ./... (run from go/)
 make vet     # go vet ./...  (run from go/)
 make fmt     # check formatting
@@ -82,6 +83,10 @@ language SDKs live under `sdk/` (e.g. `sdk/typescript/`).
 - `service.go` — Public service API used by both the CLI and HTTP server
 - `requests.go` — Request types
 - `responses.go` — Response types
+
+### Labs / Experimental Code (`go/labs/`)
+- Experimental, unstable code with **no compatibility guarantees**; stable code (`go/cmd/*`, `go/pkg/amika`, `go/internal/*`) must **not** import from it. Holds the `akfs` CLI (`go/labs/cmd/akfs/`) and library (`go/labs/akfs/`).
+- See `go/labs/AGENTS.md` before working there.
 
 ### Other
 - `dist/` — Build output directory at the repo root (gitignored)
