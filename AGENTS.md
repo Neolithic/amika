@@ -9,11 +9,12 @@ commands with `go -C go ...`, so `make` targets continue to work
 unchanged from the repo root. Build outputs are written to `dist/` at
 the repo root.
 
-**Use `make build` to build both binaries, or `make build-cli` / `make build-server` for one binary.** If you run `go build` directly, do it from the `go/` directory and write outputs to the repo-root `dist/`:
+**Use `make build` to build all binaries, or `make build-cli` / `make build-server` / `make build-amikalog` for one binary.** If you run `go build` directly, do it from the `go/` directory and write outputs to the repo-root `dist/`:
 
 ```bash
 (cd go && go build -o ../dist/amika ./cmd/amika)
 (cd go && go build -o ../dist/amika-server ./cmd/amika-server)
+(cd go && go build -o ../dist/amikalog ./cmd/amikalog)
 ```
 
 ```bash
@@ -24,9 +25,10 @@ make setup
 make ci
 
 # Individual targets
-make build         # builds both dist/amika and dist/amika-server
-make build-cli     # builds dist/amika
-make build-server  # builds dist/amika-server
+make build          # builds dist/amika, dist/amika-server, dist/amikalog
+make build-cli      # builds dist/amika
+make build-server   # builds dist/amika-server
+make build-amikalog # builds dist/amikalog
 make test    # go test ./... (run from go/)
 make vet     # go vet ./...  (run from go/)
 make fmt     # check formatting
@@ -36,6 +38,8 @@ make lint    # run revive linter
 ## Project Overview
 
 Amika is a Go module that lets people control sandboxed AI agents, focused on use-cases for AI coding agents. The goal is to provide the infra for users to build their own software factories. It includes a CLI tool `amika`, a Go package `go/pkg/amika`, and an HTTP server (`amika-server`) that exposes the same functionality as a REST API. The project uses standard Go tooling with a Makefile for common commands.
+
+The repo also ships `amikalog`, a separate, separately-installed CLI that captures Claude Code and Codex hook activity (with the git state of each hook's working directory) as raw append-only events under the amika state directory. Run `amikalog start` once to install the hooks. It is versioned and released independently of `amika` (tags `amikalog@v*`).
 
 This repository is an OSS monorepo. Go sources live under `go/`. Other
 language SDKs live under `sdk/` (e.g. `sdk/typescript/`).
@@ -57,6 +61,12 @@ language SDKs live under `sdk/` (e.g. `sdk/typescript/`).
 ### HTTP Server (`go/cmd/amika-server/`)
 - `main.go` — Entry point for the HTTP server (listens on `:8080` by default)
 
+### amikalog CLI (`go/cmd/amikalog/`)
+- `main.go` — Entry point, root Cobra command
+- `start.go` — `start` / `stop` commands that install/remove the agent hooks
+- `hook.go` — `hook --source claude|codex`, the hook entrypoint that records one event
+- `push.go` — `push` command (stub; remote upload not yet implemented)
+
 ### Internal Packages (`go/internal/`)
 - `sandbox/` — Docker sandbox management, preset image resolution + auto-build, volume and file mount stores, random name generation
 - `auth/` — Multi-source credential discovery (Claude, Codex, OpenCode, Amp) with priority-based deduplication
@@ -67,6 +77,7 @@ language SDKs live under `sdk/` (e.g. `sdk/typescript/`).
 - `app/` — Application service layer implementation
 - `ports/` — Port interfaces for Docker and store operations
 - `materialize/` — Local sandbox script execution and rsync copying (v0 legacy)
+- `eventlog/` — amikalog's hook installer + capture: writes append-only events to `<state>/events/{claude,codex}/sessions/{ts}_{session_id}/event_{seq}_{ts}.json`, annotated with git context
 
 ### Public Package (`go/pkg/amika/`)
 - `service.go` — Public service API used by both the CLI and HTTP server
@@ -77,6 +88,7 @@ language SDKs live under `sdk/` (e.g. `sdk/typescript/`).
 - `dist/` — Build output directory at the repo root (gitignored)
 - `bin/amika` — Wrapper script that auto-builds and runs `dist/amika`
 - `bin/amika-server` — Wrapper script that auto-builds and runs `dist/amika-server`
+- `bin/amikalog` — Wrapper script that auto-builds and runs `dist/amikalog`
 - `materialization-scripts/` — Example data materialization scripts
 - `go/internal/sandbox/presets/` — Dockerfiles for `coder` and `claude` presets
 - `sdk/typescript/` — TypeScript SDK

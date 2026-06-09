@@ -10,11 +10,14 @@ import (
 var (
 	amikaVersionValue       = "dev"
 	amikaServerVersionValue = "dev"
+	amikalogVersionValue    = "dev"
 
 	// AmikaVersion is the parsed semantic version for the amika CLI.
 	AmikaVersion = MustParseSemVer(amikaVersionValue)
 	// AmikaServerVersion is the parsed semantic version for the amika-server binary.
 	AmikaServerVersion = MustParseSemVer(amikaServerVersionValue)
+	// AmikalogVersion is the parsed semantic version for the amikalog CLI.
+	AmikalogVersion = MustParseSemVer(amikalogVersionValue)
 	// Commit is the full git SHA for the build.
 	Commit = "unknown"
 	// Date is the UTC build timestamp.

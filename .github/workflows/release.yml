@@ -17,6 +17,7 @@ on:
     tags:
       - "amika@v*"
       - "amika-server@v*"
+      - "amikalog@v*"
 
 permissions:
   contents: write
@@ -49,6 +50,10 @@ jobs:
             amika-server@*)
               component="amika-server"
               binary_name="amika-server"
+              ;;
+            amikalog@*)
+              component="amikalog"
+              binary_name="amikalog"
               ;;
             *)
               echo "Unsupported tag format: $TAG" >&2
@@ -122,6 +127,10 @@ jobs:
             amika-server)
               package_path="./cmd/amika-server"
               ld_version="github.com/gofixpoint/amika/go/internal/buildmeta.amikaServerVersionValue=$VERSION"
+              ;;
+            amikalog)
+              package_path="./cmd/amikalog"
+              ld_version="github.com/gofixpoint/amika/go/internal/buildmeta.amikalogVersionValue=$VERSION"
               ;;
             *)
               echo "Unsupported component: $COMPONENT" >&2
