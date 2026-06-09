@@ -10,8 +10,9 @@ import (
 )
 
 var hookCmd = &cobra.Command{
-	Use:   "hook",
-	Short: "Record an agent hook call as an event",
+	Use:    "hook",
+	Hidden: true, // invoked by the agents' hook systems, not by users
+	Short:  "Record an agent hook call as an event",
 	Long: `Record the current agent hook call as an append-only event in the amika
 state directory, annotated with the git state of the working directory.
 
