@@ -4,20 +4,24 @@ set -eu
 INSTALL_DIR="${AMIKA_INSTALL_DIR:-/usr/local/bin}"
 GITHUB_REPO="gofixpoint/amika"
 DEFAULT_VERSION="0.10.0"
-INSTALL_VERSION="$DEFAULT_VERSION"
+COMPONENT="amika"
+INSTALL_VERSION=""
 DRY_RUN=false
 
 usage() {
   cat <<EOF
-install.sh — install the amika CLI
+install.sh — install an amika release binary
 
-Downloads a specific amika release binary from GitHub and installs it.
+Downloads a specific release binary from GitHub and installs it. Installs the
+amika CLI by default, or the separately-versioned amikalog CLI with --component.
 
 Usage:
-  sh install.sh [--help] [--install-version VERSION] [--dry-run]
+  sh install.sh [--help] [--component NAME] [--install-version VERSION] [--dry-run]
 
 Flags:
-  --install-version     Install a specific version (default: ${DEFAULT_VERSION})
+  --component           Component to install: amika (default) or amikalog
+  --install-version     Install a specific version (amika default: ${DEFAULT_VERSION};
+                        required for amikalog)
   --dry-run             Show what would be done without downloading or installing
 
 Environment variables:
@@ -26,6 +30,7 @@ Environment variables:
 Examples:
   curl -fsSL https://raw.githubusercontent.com/gofixpoint/amika/main/install.sh | sh
   sh install.sh --install-version 0.1.0-rc.1
+  sh install.sh --component amikalog --install-version 0.1.0
   AMIKA_INSTALL_DIR=~/.local/bin sh install.sh
 EOF
 }
@@ -35,7 +40,7 @@ main() {
   detect_platform
   set_install_version
 
-  ARCHIVE_BASE="amika_${VERSION}_${OS}_${ARCH}"
+  ARCHIVE_BASE="${COMPONENT}_${VERSION}_${OS}_${ARCH}"
   ARCHIVE_NAME="${ARCHIVE_BASE}.tar.gz"
   DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/${TAG}/${ARCHIVE_NAME}"
   CHECKSUMS_URL="https://github.com/${GITHUB_REPO}/releases/download/${TAG}/checksums.txt"
@@ -43,17 +48,18 @@ main() {
   if [ "$DRY_RUN" = "true" ]; then
     echo ""
     echo "Dry run — would perform the following:"
+    echo "  Component:    ${COMPONENT}"
     echo "  Platform:     ${OS}/${ARCH}"
     echo "  Version:      ${VERSION} (${TAG})"
     echo "  Download URL: ${DOWNLOAD_URL}"
     echo "  Checksums:    ${CHECKSUMS_URL}"
-    echo "  Install to:   ${INSTALL_DIR}/amika"
+    echo "  Install to:   ${INSTALL_DIR}/${COMPONENT}"
     exit 0
   fi
 
   download_and_extract
   install_binary
-  echo "amika ${VERSION} installed to ${INSTALL_DIR}/amika"
+  echo "${COMPONENT} ${VERSION} installed to ${INSTALL_DIR}/${COMPONENT}"
 }
 
 parse_args() {
@@ -63,6 +69,14 @@ parse_args() {
       --help|-h)
         usage
         exit 0
+        ;;
+      --component)
+        if [ "$#" -lt 2 ]; then
+          echo "Error: --component requires a value" >&2
+          exit 1
+        fi
+        COMPONENT="$2"
+        shift
         ;;
       --install-version)
         if [ "$#" -lt 2 ]; then
@@ -108,9 +122,27 @@ detect_platform() {
 }
 
 set_install_version() {
+  case "$COMPONENT" in
+    amika) ;;
+    amikalog) ;;
+    *)
+      echo "Error: unsupported component: $COMPONENT (want amika or amikalog)" >&2
+      exit 1
+      ;;
+  esac
+
+  if [ -z "$INSTALL_VERSION" ]; then
+    if [ "$COMPONENT" = "amika" ]; then
+      INSTALL_VERSION="$DEFAULT_VERSION"
+    else
+      echo "Error: --install-version is required for component ${COMPONENT}" >&2
+      exit 1
+    fi
+  fi
+
   VERSION="${INSTALL_VERSION#v}"
-  TAG="amika@v${VERSION}"
-  echo "Installing amika release: ${TAG}"
+  TAG="${COMPONENT}@v${VERSION}"
+  echo "Installing ${COMPONENT} release: ${TAG}"
 }
 
 download_and_extract() {
@@ -124,9 +156,9 @@ download_and_extract() {
   echo "Extracting..."
   tar -xzf "${TMPDIR_INSTALL}/${ARCHIVE_NAME}" -C "$TMPDIR_INSTALL"
 
-  BINARY_PATH="${TMPDIR_INSTALL}/${ARCHIVE_BASE}/amika"
+  BINARY_PATH="${TMPDIR_INSTALL}/${ARCHIVE_BASE}/${COMPONENT}"
   if [ ! -f "$BINARY_PATH" ]; then
-    echo "Error: expected binary not found at ${ARCHIVE_BASE}/amika in archive" >&2
+    echo "Error: expected binary not found at ${ARCHIVE_BASE}/${COMPONENT} in archive" >&2
     exit 1
   fi
 
@@ -138,7 +170,7 @@ download_and_extract() {
 
 install_binary() {
   ensure_install_dir
-  DEST_PATH="${INSTALL_DIR}/amika"
+  DEST_PATH="${INSTALL_DIR}/${COMPONENT}"
 
   if [ -w "$INSTALL_DIR" ]; then
     install -m 0755 "$BINARY_PATH" "$DEST_PATH"

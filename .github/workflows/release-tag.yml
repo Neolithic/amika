@@ -17,6 +17,8 @@ name: Create Release Tag
 #   amika@v1.2.3-rc.1
 #   amika-server@v1.2.3
 #   amika-server@v1.2.3-beta.1
+#   amikalog@v1.2.3
+#   amikalog@v1.2.3-rc.1
 #   sdk-typescript@v1.2.3
 #   sdk-typescript@v1.2.3-rc.1
 
@@ -30,6 +32,7 @@ on:
         options:
           - amika
           - amika-server
+          - amikalog
           - sdk-typescript
       major:
         description: Major version number
