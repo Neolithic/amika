@@ -66,6 +66,8 @@ language SDKs live under `sdk/` (e.g. `sdk/typescript/`).
 - `main.go` — Entry point, root Cobra command
 - `start.go` — `start` / `stop` commands that install/remove the agent hooks
 - `hook.go` — `hook --source claude|codex`, the hook entrypoint that records one event
+- `push.go` — `beta:push`, uploads not-yet-pushed events to the org storage bucket (auth via `AMIKA_API_KEY` only; requests a signed upload URL per file from `POST /api/v0beta1/storage/uploads/batch`, then PUTs the bytes)
+- `fetch.go` — `beta:fetch <destination>`, downloads the entire org storage bucket into a local directory, recreating the bucket key tree on disk (auth via `AMIKA_API_KEY` only; lists the bucket via `GET /api/v0beta1/storage/downloads`, paging through `next_cursor`, then GETs each object's signed download URL)
 
 ### Internal Packages (`go/internal/`)
 - `sandbox/` — Docker sandbox management, preset image resolution + auto-build, volume and file mount stores, random name generation
@@ -77,7 +79,7 @@ language SDKs live under `sdk/` (e.g. `sdk/typescript/`).
 - `app/` — Application service layer implementation
 - `ports/` — Port interfaces for Docker and store operations
 - `materialize/` — Local sandbox script execution and rsync copying (v0 legacy)
-- `eventlog/` — amikalog's hook installer + capture: writes append-only events to `<state>/events/{claude,codex}/sessions/{ts}_{session_id}/event_{seq}_{ts}.json`, annotated with git context
+- `eventlog/` — amikalog's hook installer + capture: writes append-only events to `<state>/events/{claude,codex}/sessions/{ts}_{session_id}/event_{seq}_{ts}.json`, annotated with git context. `push.go` uploads not-yet-pushed events via an `Uploader`, tracking sent files in `<state>/events/.amikalog-push-state.json` (object key = `<repo>/<source>/sessions/...`, repo from each session's `git.repo_root`)
 
 ### Public Package (`go/pkg/amika/`)
 - `service.go` — Public service API used by both the CLI and HTTP server

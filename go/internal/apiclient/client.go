@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -440,6 +441,168 @@ func (c *Client) UpdateSession(sandboxName, sessionID string, req UpdateSessionR
 		return nil, fmt.Errorf("remote update session: %w", err)
 	}
 	return &result, nil
+}
+
+// UploadFile is one requested file in a CreateUploadBatchRequest.
+type UploadFile struct {
+	// Filename is the object key within the org bucket. Relative paths only;
+	// nested paths ("dir/report.json") are allowed.
+	Filename string `json:"filename"`
+	// Upsert overwrites an existing object at the same path when true. When
+	// false (the default) uploading to an existing path fails.
+	Upsert bool `json:"upsert,omitempty"`
+}
+
+// CreateUploadBatchRequest is the request body for POST
+// /api/v0beta1/storage/uploads/batch. It requests one signed upload URL per
+// file (1..100 files per call); the whole request fails if any file cannot be
+// signed.
+type CreateUploadBatchRequest struct {
+	Files []UploadFile `json:"files"`
+}
+
+// UploadObject is one signed upload URL in an UploadBatchResponse, bound to a
+// single object key.
+type UploadObject struct {
+	// Path is the sanitized object key the signed URL is bound to.
+	Path string `json:"path"`
+	// UploadURL is the absolute, single-use signed upload URL with the token
+	// embedded in its query string. PUT the file bytes here.
+	UploadURL string `json:"upload_url"`
+	// Token is the signed upload JWT (also embedded in UploadURL), provided
+	// separately for SDK clients that take a token argument.
+	Token string `json:"token"`
+}
+
+// UploadBatchResponse is the response from POST /api/v0beta1/storage/uploads/batch.
+// It carries one path-bound signed upload URL per requested file, in request
+// order. The bytes for each are uploaded by a separate PUT to its UploadURL
+// (see UploadToSignedURL); that PUT does not go through the Amika API.
+type UploadBatchResponse struct {
+	// Bucket is the org-scoped bucket name (derived server-side from the org id).
+	Bucket string `json:"bucket"`
+	// Objects holds one signed upload URL per requested file, in request order.
+	Objects []UploadObject `json:"objects"`
+	// ExpiresIn is the token lifetime in seconds.
+	ExpiresIn int `json:"expires_in"`
+}
+
+// CreateUploadBatch requests one-time signed upload URLs for one or more objects
+// in the caller's org-scoped storage bucket. Upload each file's bytes with
+// UploadToSignedURL using the matching object's UploadURL.
+func (c *Client) CreateUploadBatch(req CreateUploadBatchRequest) (*UploadBatchResponse, error) {
+	var result UploadBatchResponse
+	if err := c.doJSON("POST", apiBasePath+"/storage/uploads/batch", req, &result); err != nil {
+		return nil, fmt.Errorf("remote create upload batch: %w", err)
+	}
+	return &result, nil
+}
+
+// UploadToSignedURL PUTs body to a signed upload URL returned by CreateUpload.
+// The URL is absolute and carries its own token in the query string, so this
+// bypasses BaseURL and sends no Authorization header. A non-2xx response is
+// returned as a *HTTPError.
+func (c *Client) UploadToSignedURL(signedURL string, body []byte, contentType string) error {
+	req, err := http.NewRequest("PUT", signedURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("upload request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return &HTTPError{StatusCode: resp.StatusCode, Body: string(respBody)}
+	}
+	return nil
+}
+
+// DownloadObject is one object in a ListDownloadsResponse: its bucket key paired
+// with a short-lived signed URL to fetch its bytes.
+type DownloadObject struct {
+	// Key is the object key within the bucket, preserving directory structure so
+	// the tree can be recreated locally by writing each object to its key.
+	Key string `json:"key"`
+	// Size is the object size in bytes.
+	Size int64 `json:"size"`
+	// LastModified is the object's last-modified timestamp.
+	LastModified string `json:"last_modified"`
+	// DownloadURL is the absolute signed download URL; GET it to fetch the bytes.
+	DownloadURL string `json:"download_url"`
+}
+
+// ListDownloadsResponse is one page of GET /api/v0beta1/storage/downloads: a
+// flat, recursive, key-sorted listing of the org bucket, each object carrying
+// its own signed download URL. Follow NextCursor for the next page.
+type ListDownloadsResponse struct {
+	// Bucket is the org-scoped bucket name (derived server-side from the org id).
+	Bucket string `json:"bucket"`
+	// Prefix is the subtree this listing was restricted to (empty = whole bucket).
+	Prefix string `json:"prefix"`
+	// Objects holds this page of objects, key-sorted.
+	Objects []DownloadObject `json:"objects"`
+	// ExpiresIn is the signed-URL lifetime in seconds.
+	ExpiresIn int `json:"expires_in"`
+	// NextCursor is the keyset cursor for the next page, or nil on the last page.
+	NextCursor *string `json:"next_cursor"`
+}
+
+// ListDownloads fetches one page of the org bucket listing, each object paired
+// with a signed download URL. prefix restricts the listing to a subtree (empty
+// lists the whole bucket); cursor continues a prior page (empty starts at the
+// beginning); limit caps the page size (<=0 lets the server choose). Retrieve
+// each object's bytes with DownloadFromSignedURL.
+func (c *Client) ListDownloads(prefix, cursor string, limit int) (*ListDownloadsResponse, error) {
+	q := url.Values{}
+	if prefix != "" {
+		q.Set("prefix", prefix)
+	}
+	if cursor != "" {
+		q.Set("cursor", cursor)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	path := apiBasePath + "/storage/downloads"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var result ListDownloadsResponse
+	if err := c.doJSON("GET", path, nil, &result); err != nil {
+		return nil, fmt.Errorf("remote list downloads: %w", err)
+	}
+	return &result, nil
+}
+
+// DownloadFromSignedURL GETs the bytes from a signed download URL returned by
+// CreateDownload. The URL is absolute and carries its own token in the query
+// string, so this bypasses BaseURL and sends no Authorization header. A non-2xx
+// response is returned as a *HTTPError.
+func (c *Client) DownloadFromSignedURL(signedURL string) ([]byte, error) {
+	req, err := http.NewRequest("GET", signedURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading download response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body)}
+	}
+	return body, nil
 }
 
 func (c *Client) doJSON(method, path string, body interface{}, out interface{}) error {

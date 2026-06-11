@@ -2,9 +2,12 @@ package apiclient
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -238,4 +241,228 @@ func mustJSON(t *testing.T, v interface{}) string {
 func mustJSONString(t *testing.T, v interface{}) string {
 	t.Helper()
 	return mustJSON(t, v)
+}
+
+func TestCreateUploadBatch_SendsFilesAndAuth(t *testing.T) {
+	var gotMethod, gotPath, gotAuth string
+	var gotBody CreateUploadBatchRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{
+			"bucket": "org-123",
+			"objects": []map[string]any{{
+				"path":       "amika/claude/x.json",
+				"upload_url": "https://store.example/upload/sign/org-123/amika/claude/x.json?token=abc",
+				"token":      "abc",
+			}},
+			"expires_in": 7200,
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "key-xyz")
+	resp, err := c.CreateUploadBatch(CreateUploadBatchRequest{Files: []UploadFile{{Filename: "amika/claude/x.json"}}})
+	if err != nil {
+		t.Fatalf("CreateUploadBatch: %v", err)
+	}
+	if gotMethod != "POST" {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/api/v0beta1/storage/uploads/batch" {
+		t.Errorf("path = %q, want /api/v0beta1/storage/uploads/batch", gotPath)
+	}
+	if gotAuth != "Bearer key-xyz" {
+		t.Errorf("auth = %q, want Bearer key-xyz", gotAuth)
+	}
+	if len(gotBody.Files) != 1 || gotBody.Files[0].Filename != "amika/claude/x.json" {
+		t.Errorf("files = %+v", gotBody.Files)
+	}
+	if len(resp.Objects) != 1 || resp.Objects[0].UploadURL == "" || resp.Objects[0].Token != "abc" || resp.ExpiresIn != 7200 {
+		t.Errorf("response = %+v", resp)
+	}
+}
+
+func TestUploadToSignedURL_PutsBytesWithoutAuth(t *testing.T) {
+	var gotMethod, gotAuth, gotType string
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotAuth = r.Header.Get("Authorization")
+		gotType = r.Header.Get("Content-Type")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient("https://api.example", "key-xyz")
+	if err := c.UploadToSignedURL(srv.URL+"/upload?token=abc", []byte(`{"x":1}`), "application/json"); err != nil {
+		t.Fatalf("UploadToSignedURL: %v", err)
+	}
+	if gotMethod != "PUT" {
+		t.Errorf("method = %q, want PUT", gotMethod)
+	}
+	if gotAuth != "" {
+		t.Errorf("auth header = %q, want empty (token is in the URL)", gotAuth)
+	}
+	if gotType != "application/json" {
+		t.Errorf("content-type = %q", gotType)
+	}
+	if string(gotBody) != `{"x":1}` {
+		t.Errorf("body = %q", string(gotBody))
+	}
+}
+
+func TestUploadToSignedURL_Non2xxIsHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("denied"))
+	}))
+	defer srv.Close()
+
+	c := NewClient("https://api.example", "key-xyz")
+	err := c.UploadToSignedURL(srv.URL, []byte("x"), "application/json")
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error = %v, want *HTTPError", err)
+	}
+	if httpErr.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", httpErr.StatusCode)
+	}
+}
+
+func TestListDownloads_SendsQueryAndParsesPage(t *testing.T) {
+	var gotMethod, gotPath, gotRawQuery, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotRawQuery = r.URL.RawQuery
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{
+			"bucket": "org-123",
+			"prefix": "",
+			"objects": []map[string]any{{
+				"key":           "amika/claude/x.json",
+				"size":          12,
+				"last_modified": "2026-01-01T00:00:00Z",
+				"download_url":  "https://store.example/object/sign/org-123/amika/claude/x.json?token=abc",
+			}},
+			"expires_in":  3600,
+			"next_cursor": "CURSOR2",
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "key-xyz")
+	resp, err := c.ListDownloads("", "", 1000)
+	if err != nil {
+		t.Fatalf("ListDownloads: %v", err)
+	}
+	if gotMethod != "GET" {
+		t.Errorf("method = %q, want GET", gotMethod)
+	}
+	if gotPath != "/api/v0beta1/storage/downloads" {
+		t.Errorf("path = %q, want /api/v0beta1/storage/downloads", gotPath)
+	}
+	if gotRawQuery != "limit=1000" {
+		t.Errorf("query = %q, want limit=1000", gotRawQuery)
+	}
+	if gotAuth != "Bearer key-xyz" {
+		t.Errorf("auth = %q, want Bearer key-xyz", gotAuth)
+	}
+	if len(resp.Objects) != 1 || resp.Objects[0].Key != "amika/claude/x.json" || resp.Objects[0].DownloadURL == "" {
+		t.Errorf("objects = %+v", resp.Objects)
+	}
+	if resp.Objects[0].Size != 12 {
+		t.Errorf("size = %d, want 12", resp.Objects[0].Size)
+	}
+	if resp.NextCursor == nil || *resp.NextCursor != "CURSOR2" {
+		t.Errorf("next_cursor = %v, want CURSOR2", resp.NextCursor)
+	}
+}
+
+func TestListDownloads_PassesPrefixAndCursorOmitsZeroLimit(t *testing.T) {
+	var gotRawQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRawQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]any{
+			"bucket":      "org-123",
+			"prefix":      "amika/",
+			"objects":     []any{},
+			"expires_in":  3600,
+			"next_cursor": nil,
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "key-xyz")
+	resp, err := c.ListDownloads("amika/", "CUR", 0)
+	if err != nil {
+		t.Fatalf("ListDownloads: %v", err)
+	}
+	q, err := url.ParseQuery(gotRawQuery)
+	if err != nil {
+		t.Fatalf("parsing query %q: %v", gotRawQuery, err)
+	}
+	if q.Get("prefix") != "amika/" {
+		t.Errorf("prefix = %q, want amika/", q.Get("prefix"))
+	}
+	if q.Get("cursor") != "CUR" {
+		t.Errorf("cursor = %q, want CUR", q.Get("cursor"))
+	}
+	if _, ok := q["limit"]; ok {
+		t.Errorf("limit present in query %q, want omitted when <=0", gotRawQuery)
+	}
+	if resp.NextCursor != nil {
+		t.Errorf("next_cursor = %v, want nil", resp.NextCursor)
+	}
+}
+
+func TestDownloadFromSignedURL_GetsBytesWithoutAuth(t *testing.T) {
+	var gotMethod, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"event":1}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient("https://api.example", "key-xyz")
+	body, err := c.DownloadFromSignedURL(srv.URL + "/object?token=abc")
+	if err != nil {
+		t.Fatalf("DownloadFromSignedURL: %v", err)
+	}
+	if gotMethod != "GET" {
+		t.Errorf("method = %q, want GET", gotMethod)
+	}
+	if gotAuth != "" {
+		t.Errorf("auth header = %q, want empty (token is in the URL)", gotAuth)
+	}
+	if string(body) != `{"event":1}` {
+		t.Errorf("body = %q", string(body))
+	}
+}
+
+func TestDownloadFromSignedURL_Non2xxIsHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("missing"))
+	}))
+	defer srv.Close()
+
+	c := NewClient("https://api.example", "key-xyz")
+	_, err := c.DownloadFromSignedURL(srv.URL)
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error = %v, want *HTTPError", err)
+	}
+	if httpErr.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", httpErr.StatusCode)
+	}
 }
