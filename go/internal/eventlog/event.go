@@ -81,6 +81,13 @@ func rawPayload(data []byte) json.RawMessage {
 // carries its own timestamp, write distinct files with the same Seq. Locking at
 // the sessions-root level also serializes session-directory creation, so two
 // first-hooks of a brand-new session cannot create two directories for it.
+//
+// Each event is written to a temporary file and then atomically renamed into
+// place. The lock only serializes writers; beta:push scans and uploads event
+// files without taking it, so a reader could otherwise observe an "event_" file
+// that exists but is not yet fully encoded and upload truncated bytes. The
+// temp file is named so it is ignored by countEvents and the pushed file set
+// (neither has the "event_" prefix) until the rename publishes it complete.
 func writeEvent(stateDir string, ev Event) error {
 	now := time.Now().UTC()
 	ev.Timestamp = now.Format(time.RFC3339Nano)
@@ -103,29 +110,47 @@ func writeEvent(stateDir string, ev Event) error {
 
 	ts := fileTimestamp(now)
 	seq := countEvents(sessionDir)
+	// Pick the first unused sequence number. The lock means no other writer can
+	// claim it between this check and the rename below.
 	for {
 		path := filepath.Join(sessionDir, fmt.Sprintf("event_%d_%s.json", seq, ts))
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err != nil {
-			if errors.Is(err, os.ErrExist) {
-				seq++
-				continue
-			}
-			return fmt.Errorf("creating event file %s: %w", path, err)
+		_, statErr := os.Stat(path)
+		if statErr == nil {
+			seq++
+			continue
+		}
+		if !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("checking event file %s: %w", path, statErr)
 		}
 		ev.Seq = seq
-		enc := json.NewEncoder(f)
-		enc.SetIndent("", "  ")
-		if encErr := enc.Encode(ev); encErr != nil {
-			f.Close()
-			_ = os.Remove(path)
-			return fmt.Errorf("writing event %s: %w", path, encErr)
-		}
-		if closeErr := f.Close(); closeErr != nil {
-			return fmt.Errorf("closing event %s: %w", path, closeErr)
-		}
-		return nil
+		return writeEventFile(sessionDir, path, ev)
 	}
+}
+
+// writeEventFile encodes ev into a temp file in dir and atomically renames it to
+// finalPath, so a concurrent reader never sees a partially-written event.
+func writeEventFile(dir, finalPath string, ev Event) error {
+	f, err := os.CreateTemp(dir, ".event-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp event file in %s: %w", dir, err)
+	}
+	tmp := f.Name()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	if encErr := enc.Encode(ev); encErr != nil {
+		f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("writing event %s: %w", finalPath, encErr)
+	}
+	if closeErr := f.Close(); closeErr != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("closing event %s: %w", finalPath, closeErr)
+	}
+	if renErr := os.Rename(tmp, finalPath); renErr != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("publishing event %s: %w", finalPath, renErr)
+	}
+	return nil
 }
 
 // resolveSessionDir returns the directory holding sessionID's events, creating
