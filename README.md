@@ -196,6 +196,55 @@ Preset images are built automatically on first use from bundled Dockerfiles (one
 
 Agent credentials are auto-discovered from your host and mounted as read-only snapshots — coding agents authenticate without manual configuration. See [docs/presets.md](docs/presets.md) and [docs/auth.md](docs/auth.md) for details.
 
+## amikalog
+
+`amikalog` is a separate, independently-versioned CLI that captures Claude Code and Codex hook activity — along with the git state of each hook's working directory — as append-only events under the amika state directory.
+
+### Install
+
+Install the latest release binary with the install script, passing `--component amikalog`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gofixpoint/amika/main/install.sh | sh -s -- --component amikalog
+```
+
+This downloads the release binary, verifies its checksum, and installs `amikalog` to `/usr/local/bin` (override with `AMIKA_INSTALL_DIR`). Pin a specific version with `--install-version`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gofixpoint/amika/main/install.sh | sh -s -- --component amikalog --install-version 0.1.0
+```
+
+<details>
+<summary>Build from source instead</summary>
+
+Requires Go 1.21+. Build outputs land in `dist/`:
+
+```bash
+git clone https://github.com/gofixpoint/amika.git && cd amika
+make build-amikalog
+```
+
+When built from source, invoke the binary as `./dist/amikalog`.
+
+</details>
+
+### Capture agent activity
+
+Install the Claude Code and Codex hooks once — this is what makes `amikalog` start recording:
+
+```bash
+amikalog start
+```
+
+From then on, agent and git activity is captured as append-only events under the amika state directory. Run `amikalog stop` to remove the hooks.
+
+Optionally sync captured events with your org's storage (requires `AMIKA_API_KEY`):
+
+```bash
+amikalog beta:push          # upload not-yet-pushed events
+amikalog beta:fetch <dir>   # download the org bucket into <dir>
+```
+
 ## Roadmap
 
 - [x] Docker-backed persistent sandboxes
