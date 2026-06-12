@@ -9,35 +9,35 @@ standalone tool: you can use it without anything else from amika.
 ## The problem: your best agent work is trapped
 
 Your agent just did three hours of brilliant work: explored the codebase, made
-decisions, edited files, fixed its own mistakes. And right now, all of that is
-locked inside the agent harness: internal session state in a format that
-nothing else can use. The next agent session starts cold. Your CI can't check
-what the agent actually did. You can't mine last month's sessions for the
-patterns that worked or the mistakes that keep recurring.
+decisions, edited files, fixed its own mistakes. All of that is now locked
+inside the agent harness, in a format nothing else can use. The next agent
+session starts cold. Your CI can't check what the agent actually did. You
+can't mine last month's sessions for the patterns that worked or the mistakes
+that keep recurring.
 
-Most tooling in this space captures sessions so a *human* can look back at
-them. That's useful, but it leaves the real value on the table: sessions are
-data, and data wants to be fed *forward* into the next agent run, into
-guardrails, into evals.
+Most tooling captures sessions so a *human* can look back at them. That's
+useful, but it leaves the real value on the table: sessions are data, and data
+wants to be fed *forward* into the next agent run, into guardrails, into
+evals.
 
 ## The solution: capture once, reuse everywhere
 
-`amikalog` records every agent session as raw, append-only JSON events under a
+`amikalog` records every agent session as append-only JSON events under a
 predictable directory tree on your own disk. It rides the agents' own hook
-systems — both Claude Code and Codex can run a command at lifecycle points like
-"tool call finished" or "prompt submitted" — so each event carries the agent's
-hook payload plus the git state it happened in: repo, commit, branch, dirty or
+systems: both Claude Code and Codex can run a command at lifecycle points like
+"tool call finished" or "prompt submitted". Each event carries the hook
+payload plus the git state it happened in: repo, commit, branch, dirty or
 clean. No daemon, no proxy, no change to how you invoke the agent: you run
-`amikalog start` once, and from then on the agents themselves record their
-activity on every hook call.
+`amikalog start` once, and from then on the agents record their own activity
+on every hook call.
 
-amikalog's job is the capture half: produce a complete event log with a stable
-schema, as ordinary files. The reuse half is deliberately open-ended — because
-the output is just JSON on disk, you close the loop with whatever you already
-have (`jq`, a script, a cron job, your agent's own file tools):
+amikalog's job is the capture half: a complete event log with a stable schema,
+as ordinary files. The reuse half is deliberately open-ended. Because the
+output is just JSON on disk, you close the loop with whatever you already have
+(`jq`, a script, a cron job, your agent's own file tools):
 
-- **Memory** — have a new session read the event log from past sessions in the
-  same repo before it starts, so agents stop rediscovering the same context.
+- **Memory** — have a new session read past sessions' event logs in the same
+  repo, so agents stop rediscovering the same context.
 - **Guardrails** — mine past sessions for the rules your team keeps learning
   the hard way ("always rotate refresh tokens") and write them into the
   instruction files (`CLAUDE.md`, `AGENTS.md`) that future runs load.
@@ -45,7 +45,7 @@ have (`jq`, a script, a cron job, your agent's own file tools):
   pinned to the exact commit it did it on. Real sessions make the best test
   cases.
 
-And it's agent-agnostic: Claude Code and Codex events share one schema, so
+It's agent-agnostic, too: Claude Code and Codex events share one schema, so
 anything you build on top works across agents.
 
 ## Quick start
@@ -61,15 +61,15 @@ Pin a specific version with `--install-version` (amikalog is released
 independently of `amika`, under tags of the form `amikalog@v*`). To build from
 source instead, run `make build-amikalog` (output lands in `dist/amikalog`).
 
-Then turn on capture — once, globally:
+Then turn on capture (once, globally):
 
 ```bash
 amikalog start
 ```
 
 That's it. Use Claude Code and Codex exactly as before; every session is now
-being recorded. `amikalog stop` undoes it — only the hooks amikalog installed
-are removed, unrelated hooks and already-captured events are left alone.
+being recorded. `amikalog stop` undoes it: only the hooks amikalog installed
+are removed; unrelated hooks and already-captured events are left alone.
 
 ## How capture works
 
@@ -95,8 +95,8 @@ Events are written under the amika state directory
 <state>/events/{claude,codex}/sessions/<ts>_<session-id>/event_<seq>_<ts>.json
 ```
 
-Each file is one JSON event and is never modified after being written —
-sessions are ordinary directories you can `grep`, `jq`, sync, or load into a
+Each file is one JSON event and is never modified after being written.
+Sessions are ordinary directories you can `grep`, `jq`, sync, or load into a
 database. An event records:
 
 | Field        | Description                                                              |
@@ -113,7 +113,7 @@ database. An event records:
 ## Sharing sessions with your org (beta)
 
 Local capture is the default and works entirely offline. But sessions get more
-valuable when the whole team's land in one place — that's the corpus your
+valuable when the whole team's land in one place: that's the corpus your
 memory, guardrails, and evals draw from. Two beta commands sync the event log
 with a storage bucket that the hosted Amika platform (`app.amika.dev`) manages
 for your organization. Both authenticate by setting `AMIKA_API_KEY` to an org
@@ -131,7 +131,7 @@ amikalog beta:fetch <dir>   # download the org bucket into <dir>
 captured since the last push, and re-pushing is idempotent.
 
 `beta:fetch` downloads every object in the org bucket into a local directory,
-recreating the bucket's key tree on disk — your whole org's sessions, as
+recreating the bucket's key tree on disk: your whole org's sessions, as
 ordinary files.
 
 ## Command reference
@@ -144,7 +144,7 @@ ordinary files.
 | `amikalog beta:fetch <dir>` | Download the entire org storage bucket into a local directory |
 | `amikalog version`          | Print version information                                     |
 
-There is also a hidden `amikalog hook --source claude|codex` command — the
+There is also a hidden `amikalog hook --source claude|codex` command, the
 entrypoint the agents' hook systems invoke. It is not meant to be run by hand.
 
 ## Environment variables
