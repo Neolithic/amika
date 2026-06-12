@@ -57,8 +57,9 @@ Install the latest release binary with the install script, passing
 curl -fsSL https://raw.githubusercontent.com/gofixpoint/amika/main/install.sh | sh -s -- --component amikalog
 ```
 
-Pin a specific version with `--install-version`. To build from source instead,
-run `make build-amikalog` (output lands in `dist/amikalog`).
+Pin a specific version with `--install-version` (amikalog is released
+independently of `amika`, under tags of the form `amikalog@v*`). To build from
+source instead, run `make build-amikalog` (output lands in `dist/amikalog`).
 
 Then turn on capture — once, globally:
 
@@ -69,9 +70,6 @@ amikalog start
 That's it. Use Claude Code and Codex exactly as before; every session is now
 being recorded. `amikalog stop` undoes it — only the hooks amikalog installed
 are removed, unrelated hooks and already-captured events are left alone.
-
-`amikalog` is versioned and released independently of `amika`, under tags of
-the form `amikalog@v*`.
 
 ## How capture works
 
@@ -84,10 +82,9 @@ the form `amikalog@v*`.
 - `~/.codex/hooks.json` — one entry per Codex lifecycle event (honors
   `$CODEX_HOME`)
 
-The hooks are global — they fire in every repository — and each event records
-the git commit, branch, dirty state, and working directory it ran in. Capture
-is best-effort by design: a failure to record is reported on stderr but never
-blocks the agent or alters its behavior.
+The hooks are global: they fire in every repository. Capture is best-effort by
+design: a failure to record is reported on stderr but never blocks the agent
+or alters its behavior.
 
 ## Event storage
 
@@ -119,9 +116,8 @@ Local capture is the default and works entirely offline. But sessions get more
 valuable when the whole team's land in one place — that's the corpus your
 memory, guardrails, and evals draw from. Two beta commands sync the event log
 with a storage bucket that the hosted Amika platform (`app.amika.dev`) manages
-for your organization. Both authenticate with an org API key via
-`AMIKA_API_KEY` (no other auth source is consulted) and talk to the API at
-`AMIKA_API_URL` (default `https://app.amika.dev`).
+for your organization. Both authenticate by setting `AMIKA_API_KEY` to an org
+API key; no other auth source is consulted.
 
 ```bash
 amikalog beta:push          # upload not-yet-pushed events
