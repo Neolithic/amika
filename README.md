@@ -245,6 +245,8 @@ amikalog beta:push          # upload not-yet-pushed events
 amikalog beta:fetch <dir>   # download the org bucket into <dir>
 ```
 
+See [docs/amikalog.md](docs/amikalog.md) for the full command reference, event storage layout, and event schema.
+
 ## Roadmap
 
 - [x] Docker-backed persistent sandboxes
