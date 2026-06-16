@@ -17,7 +17,8 @@ RUN npm install -g pnpm typescript tsx
 # Reset ownership before switching users so the image is consistent regardless
 # of postinstall behavior.
 ARG AGENT_CLI_CACHE_BUST=
-RUN npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai \
+RUN echo "agent-cli-cache-bust: $AGENT_CLI_CACHE_BUST" \
+    && npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai \
     && chown -R amika:amika /home/amika
 
 USER amika
