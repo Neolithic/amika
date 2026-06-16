@@ -16,6 +16,7 @@ set -euo pipefail
 #/
 #/ Options:
 #/   --platform <plat>    Override build platform (linux/amd64 or linux/arm64)
+#/   --no-cache           Pass --no-cache to docker build (disable layer cache entirely)
 #/   --ignore-unstaged    Continue even if there are unstaged changes
 #/   --push-daytona       Push built images to Daytona orgs amika-prod and Fixpoint (requires linux/amd64)
 #/   --ci                 Authenticate via DAYTONA_PROD_API_KEY (amika-prod) and DAYTONA_STAGING_API_KEY (Fixpoint)
@@ -61,6 +62,7 @@ image_presets() {
 # Parse arguments
 IMAGES=()
 PLATFORM=""
+NO_CACHE=false
 IGNORE_UNSTAGED=false
 PUSH_DAYTONA=false
 CI_AUTH=false
@@ -72,6 +74,7 @@ while [ $# -gt 0 ]; do
         echo "Error: --platform requires a value" >&2; exit 1
       fi
       PLATFORM="$2"; shift 2 ;;
+    --no-cache)        NO_CACHE=true; shift ;;
     --ignore-unstaged) IGNORE_UNSTAGED=true; shift ;;
     --push-daytona)    PUSH_DAYTONA=true; shift ;;
     --ci)              CI_AUTH=true; shift ;;
@@ -171,6 +174,9 @@ for preset in "${PRESETS[@]}"; do
   dockerfile="$REPO_ROOT/go/internal/sandbox/presets/${preset}/Dockerfile"
 
   docker_args=(build)
+  if [ "$NO_CACHE" = true ]; then
+    docker_args+=(--no-cache)
+  fi
   if [ -n "$PLATFORM" ]; then
     docker_args+=(--platform "$PLATFORM")
     echo "Building ${image_tag} and ${latest_tag} (platform: ${PLATFORM}) from ${dockerfile}..."
