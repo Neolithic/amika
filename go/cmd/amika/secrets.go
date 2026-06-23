@@ -527,9 +527,18 @@ func newProviderPushCmd(p providerConfig) *cobra.Command {
 			}
 
 			// Provider secrets have no update endpoint, so --force overwrites by
-			// deleting any same-named credential before creating the new one.
+			// deleting the conflicting credential before creating the new one.
 			// This is not atomic: if the create below fails, the old credential
 			// is already gone.
+			//
+			// What counts as "conflicting" depends on scope, mirroring the
+			// server's uniqueness rules:
+			//   - user scope: unique by (name, scope), so replace only a
+			//     same-named user-scoped credential. A same-named org
+			//     credential legitimately coexists and is left alone.
+			//   - org scope: at most one org-scoped credential per provider
+			//     (any name or type), so replace whatever org-scoped
+			//     credential exists.
 			replaced := false
 			if force {
 				existing, err := client.ListProviderSecrets(p.APIPath)
@@ -537,13 +546,20 @@ func newProviderPushCmd(p providerConfig) *cobra.Command {
 					return err
 				}
 				for _, item := range existing {
-					if item.Name == name {
-						if err := client.DeleteProviderSecret(p.APIPath, item.ID); err != nil {
-							return fmt.Errorf("overwriting existing %s credential %q: %w",
-								p.ShortName, name, err)
-						}
-						replaced = true
+					var conflicts bool
+					if scope == "org" {
+						conflicts = item.Scope == "org"
+					} else {
+						conflicts = item.Scope == scope && item.Name == name
 					}
+					if !conflicts {
+						continue
+					}
+					if err := client.DeleteProviderSecret(p.APIPath, item.ID); err != nil {
+						return fmt.Errorf("overwriting existing %s credential %q: %w",
+							p.ShortName, item.Name, err)
+					}
+					replaced = true
 				}
 			}
 

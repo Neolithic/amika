@@ -299,9 +299,10 @@ type ProviderSecretSummary struct {
 // ProviderSecretListItem is an item in the GET /api/v0beta1/secrets/<provider>
 // response.
 type ProviderSecretListItem struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Type string `json:"type"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Scope string `json:"scope"` // "user" or "org"
 }
 
 // CreateProviderSecret uploads provider-scoped credentials (e.g. Claude,
