@@ -605,6 +605,35 @@ func (c *Client) DownloadFromSignedURL(signedURL string) ([]byte, error) {
 	return body, nil
 }
 
+// GetObjectByKey fetches the current bytes of a single object by its exact
+// bucket key. There is no single-object endpoint, so it lists the subtree at
+// key (a prefix listing returns the object under its own key, possibly
+// alongside keys that share it as a prefix) and downloads the entry whose Key
+// matches exactly. found is false when no object has that exact key, which the
+// caller can treat as "no cloud copy yet".
+func (c *Client) GetObjectByKey(key string) (data []byte, found bool, err error) {
+	cursor := ""
+	for {
+		resp, err := c.ListDownloads(key, cursor, 0)
+		if err != nil {
+			return nil, false, err
+		}
+		for _, o := range resp.Objects {
+			if o.Key == key {
+				b, err := c.DownloadFromSignedURL(o.DownloadURL)
+				if err != nil {
+					return nil, false, err
+				}
+				return b, true, nil
+			}
+		}
+		if resp.NextCursor == nil || *resp.NextCursor == "" {
+			return nil, false, nil
+		}
+		cursor = *resp.NextCursor
+	}
+}
+
 func (c *Client) doJSON(method, path string, body interface{}, out interface{}) error {
 	var bodyReader io.Reader
 	if body != nil {
