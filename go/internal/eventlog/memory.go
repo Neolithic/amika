@@ -121,16 +121,20 @@ func claudeProjectDirName(cwd string) string {
 	}, cwd)
 }
 
-// PushMemories uploads the Claude memory files of every project amikalog has
-// captured Claude sessions for, reconciling each against its cloud copy so an
-// in-place edit on this machine never clobbers an edit made elsewhere.
+// PushMemories uploads Claude memory files, reconciling each against its cloud
+// copy so an in-place edit on this machine never clobbers an edit made elsewhere.
 //
-// A memory file lives at ~/.claude/projects/<project>/memory/*.md, where
-// <project> is derived from the session's working directory (claudeProjectDirName).
-// Its object key is "<repo>/memory/<relpath>", sharing the repository prefix of
-// that project's captured sessions. For each file PushMemories compares the
-// local content, the cloud content, and the last-synced hash recorded in a
-// dedicated manifest:
+// By default only the projects amikalog has captured Claude sessions for are
+// considered, so each file's repository prefix comes from its session. When
+// allProjects is true every ~/.claude/projects/*/memory directory is scanned,
+// including projects with no captured session; the repository prefix for those
+// is recovered from the project's own Claude transcript working directory (and
+// the git repo there), falling back to "unknown-repo".
+//
+// A memory file lives at ~/.claude/projects/<project>/memory/*.md and its object
+// key is "<repo>/memory/<relpath>". For each file PushMemories compares the local
+// content, the cloud content, and the last-synced hash recorded in a dedicated
+// manifest:
 //   - no cloud copy        -> upload local
 //   - identical            -> skip
 //   - only local changed   -> upload local
@@ -140,7 +144,7 @@ func claudeProjectDirName(cwd string) string {
 // The run-wide push lock is held for the duration (the same lock Push takes), so
 // concurrent pushes cannot interleave overwrites. Per-file failures are recorded
 // in the report and do not abort the run.
-func PushMemories(stateDir, home string, up Uploader, down Downloader, merger Merger) (MemoryPushReport, error) {
+func PushMemories(stateDir, home string, allProjects bool, up Uploader, down Downloader, merger Merger) (MemoryPushReport, error) {
 	eventsBase := filepath.Join(stateDir, "events")
 	if err := os.MkdirAll(eventsBase, 0o755); err != nil {
 		return MemoryPushReport{}, fmt.Errorf("creating events dir %s: %w", eventsBase, err)
@@ -158,7 +162,7 @@ func PushMemories(stateDir, home string, up Uploader, down Downloader, merger Me
 		return MemoryPushReport{}, err
 	}
 
-	units, err := collectMemoryUnits(stateDir, home)
+	units, err := collectMemoryUnits(stateDir, home, allProjects)
 	if err != nil {
 		return MemoryPushReport{}, err
 	}
@@ -196,49 +200,55 @@ func PushMemories(stateDir, home string, up Uploader, down Downloader, merger Me
 }
 
 // collectMemoryUnits lists the memory files to reconcile: one per *.md file in
-// the memory directory of each project amikalog has captured a Claude session
-// for. The repository prefix for each project is taken from its sessions so a
-// repo's memory files land alongside its events under the same "<repo>/" key.
-func collectMemoryUnits(stateDir, home string) ([]memoryUnit, error) {
-	sessionsRoot := EventsDir(stateDir, SourceClaude)
-	entries, err := os.ReadDir(sessionsRoot)
+// a project's memory directory. By default only projects amikalog has captured a
+// Claude session for are scanned, each keyed under the repository prefix from its
+// sessions so a repo's memory lands alongside its events under the same "<repo>/"
+// key. When allProjects is true every ~/.claude/projects/*/memory directory is
+// scanned; a project with no captured session has its repository prefix recovered
+// from its own Claude transcript (see repoSegmentForProjectDir).
+func collectMemoryUnits(stateDir, home string, allProjects bool) ([]memoryUnit, error) {
+	projectsRoot := filepath.Join(home, ".claude", "projects")
+
+	// Seed each captured project directory with its repository segment, derived
+	// from amikalog's own session capture.
+	repoByProjectDir, err := trackedProjectRepoSegments(stateDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("reading claude sessions: %w", err)
+		return nil, err
 	}
 
-	// Map each captured project working directory to its repository segment.
-	repoByCwd := map[string]string{}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(sessionsRoot, e.Name()))
+	// Decide which project directories to scan.
+	var projectDirs []string
+	if allProjects {
+		entries, err := os.ReadDir(projectsRoot)
 		if err != nil {
-			return nil, fmt.Errorf("reading %s: %w", e.Name(), err)
+			if os.IsNotExist(err) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("reading claude projects: %w", err)
 		}
-		cwd := cwdFromJSONL(data)
-		if cwd == "" {
-			continue
+		for _, e := range entries {
+			if e.IsDir() {
+				projectDirs = append(projectDirs, e.Name())
+			}
 		}
-		if _, ok := repoByCwd[cwd]; !ok {
-			repoByCwd[cwd] = repoSegmentFromJSONL(data)
+	} else {
+		for dir := range repoByProjectDir {
+			projectDirs = append(projectDirs, dir)
 		}
 	}
-
-	cwds := make([]string, 0, len(repoByCwd))
-	for cwd := range repoByCwd {
-		cwds = append(cwds, cwd)
-	}
-	sort.Strings(cwds)
+	sort.Strings(projectDirs)
 
 	var units []memoryUnit
 	seen := map[string]bool{}
-	for _, cwd := range cwds {
-		repoSeg := repoByCwd[cwd]
-		memoryDir := filepath.Join(home, ".claude", "projects", claudeProjectDirName(cwd), "memory")
+	for _, dir := range projectDirs {
+		projectDir := filepath.Join(projectsRoot, dir)
+		repoSeg, ok := repoByProjectDir[dir]
+		if !ok {
+			// Untracked project (allProjects only): recover its repository from
+			// the project's own Claude transcript.
+			repoSeg = repoSegmentForProjectDir(projectDir)
+		}
+		memoryDir := filepath.Join(projectDir, "memory")
 		walkErr := filepath.WalkDir(memoryDir, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				// The memory directory simply may not exist for this project.
@@ -269,6 +279,83 @@ func collectMemoryUnits(stateDir, home string) ([]memoryUnit, error) {
 		}
 	}
 	return units, nil
+}
+
+// trackedProjectRepoSegments maps each Claude project directory name amikalog has
+// captured a session for to that project's repository segment, read from the
+// session's working directory and git context.
+func trackedProjectRepoSegments(stateDir string) (map[string]string, error) {
+	repoByProjectDir := map[string]string{}
+	sessionsRoot := EventsDir(stateDir, SourceClaude)
+	entries, err := os.ReadDir(sessionsRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return repoByProjectDir, nil
+		}
+		return nil, fmt.Errorf("reading claude sessions: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(sessionsRoot, e.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", e.Name(), err)
+		}
+		cwd := cwdFromJSONL(data)
+		if cwd == "" {
+			continue
+		}
+		dir := claudeProjectDirName(cwd)
+		if _, ok := repoByProjectDir[dir]; !ok {
+			repoByProjectDir[dir] = repoSegmentFromJSONL(data)
+		}
+	}
+	return repoByProjectDir, nil
+}
+
+// repoSegmentForProjectDir recovers a repository segment for an untracked Claude
+// project directory: it reads the working directory from the project's own Claude
+// transcript and inspects that directory's git repository. It returns
+// "unknown-repo" when there is no transcript cwd or the directory is not a repo.
+func repoSegmentForProjectDir(projectDir string) string {
+	cwd := cwdFromClaudeTranscripts(projectDir)
+	if cwd == "" {
+		return unknownRepoSegment
+	}
+	if git := GatherGit(cwd); git != nil && git.RepoRoot != "" {
+		return sanitizeRepoSegment(filepath.Base(git.RepoRoot))
+	}
+	return unknownRepoSegment
+}
+
+// cwdFromClaudeTranscripts returns the working directory recorded in a project's
+// Claude Code transcript (the *.jsonl files Claude writes directly under the
+// project directory), or "" when none is found. Claude's transcript lines carry
+// a top-level "cwd" field, so cwdFromJSONL (which reads Event.CWD, tagged "cwd")
+// extracts it without needing the full Event shape.
+func cwdFromClaudeTranscripts(projectDir string) string {
+	entries, err := os.ReadDir(projectDir)
+	if err != nil {
+		return ""
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		data, err := os.ReadFile(filepath.Join(projectDir, name))
+		if err != nil {
+			continue
+		}
+		if cwd := cwdFromJSONL(data); cwd != "" {
+			return cwd
+		}
+	}
+	return ""
 }
 
 // reconcileMemory reconciles one memory file against its cloud copy using the

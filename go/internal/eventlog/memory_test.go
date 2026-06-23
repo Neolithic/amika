@@ -92,7 +92,7 @@ func TestCollectMemoryUnits(t *testing.T) {
 		}
 	}
 
-	units, err := collectMemoryUnits(stateDir, home)
+	units, err := collectMemoryUnits(stateDir, home, false)
 	if err != nil {
 		t.Fatalf("collectMemoryUnits: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestPushMemories_UploadsThenSkipsAndWritesManifest(t *testing.T) {
 	down := &fakeDownloader{data: map[string][]byte{}}
 	merger := &fakeMerger{}
 
-	rep, err := PushMemories(stateDir, home, up, down, merger)
+	rep, err := PushMemories(stateDir, home, false, up, down, merger)
 	if err != nil {
 		t.Fatalf("PushMemories: %v", err)
 	}
@@ -293,11 +293,78 @@ func TestPushMemories_UploadsThenSkipsAndWritesManifest(t *testing.T) {
 
 	// Second run: the cloud now holds what we uploaded, so it is a no-op skip.
 	down.data["myrepo/memory/fact.md"] = up.bytesFor("myrepo/memory/fact.md")
-	rep2, err := PushMemories(stateDir, home, up, down, merger)
+	rep2, err := PushMemories(stateDir, home, false, up, down, merger)
 	if err != nil {
 		t.Fatalf("PushMemories second run: %v", err)
 	}
 	if rep2.Uploaded != 0 || rep2.Skipped != 1 {
 		t.Fatalf("second run report = %+v, want 1 skipped", rep2)
 	}
+}
+
+func TestCollectMemoryUnits_AllProjects(t *testing.T) {
+	requireGit(t)
+	stateDir := t.TempDir()
+	home := t.TempDir()
+
+	// Tracked project: amikalog captured a session recording its cwd + repo.
+	trackedCwd := "/work/tracked"
+	writeSessionFile(t, stateDir, SourceClaude, "20240101T000000.000000000Z_sess-a.jsonl",
+		eventLineCWD(t, trackedCwd, &GitInfo{RepoRoot: "/work/tracked"}))
+	trackedMem := filepath.Join(home, ".claude", "projects", "-work-tracked", "memory")
+	if err := os.MkdirAll(trackedMem, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trackedMem, "a.md"), []byte("a"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Untracked project: no amikalog session, but a Claude transcript points at a
+	// real git repo so its repo segment is recovered from git.
+	repoDir := filepath.Join(t.TempDir(), "untracked-repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	initRepo(t, repoDir)
+	untrackedProject := filepath.Join(home, ".claude", "projects", claudeProjectDirName(repoDir))
+	if err := os.MkdirAll(filepath.Join(untrackedProject, "memory"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Claude's own transcript carries the working directory.
+	if err := os.WriteFile(filepath.Join(untrackedProject, "transcript.jsonl"),
+		[]byte(`{"cwd":"`+repoDir+`"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(untrackedProject, "memory", "b.md"), []byte("b"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Default mode: only the tracked project's memory is collected.
+	got, err := collectMemoryUnits(stateDir, home, false)
+	if err != nil {
+		t.Fatalf("collectMemoryUnits(false): %v", err)
+	}
+	if len(got) != 1 || got[0].objectKey != "tracked/memory/a.md" {
+		t.Fatalf("default mode keys = %v, want [tracked/memory/a.md]", keysOf(got))
+	}
+
+	// All-projects mode: both, with the untracked repo segment recovered from git.
+	got, err = collectMemoryUnits(stateDir, home, true)
+	if err != nil {
+		t.Fatalf("collectMemoryUnits(true): %v", err)
+	}
+	wantUntracked := "untracked-repo/memory/b.md"
+	keys := keysOf(got)
+	sort.Strings(keys)
+	if len(keys) != 2 || keys[0] != "tracked/memory/a.md" || keys[1] != wantUntracked {
+		t.Fatalf("all-projects keys = %v, want [tracked/memory/a.md %s]", keys, wantUntracked)
+	}
+}
+
+func keysOf(units []memoryUnit) []string {
+	ks := make([]string, 0, len(units))
+	for _, u := range units {
+		ks = append(ks, u.objectKey)
+	}
+	return ks
 }

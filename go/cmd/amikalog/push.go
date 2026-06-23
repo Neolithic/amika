@@ -10,8 +10,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// skipMemories disables uploading Claude memory files alongside captured events.
-var skipMemories bool
+// uploadMemories opts into uploading Claude memory files alongside captured
+// events. allMemoryProjects extends that to projects with no captured session.
+var (
+	uploadMemories    bool
+	allMemoryProjects bool
+)
 
 var pushCmd = &cobra.Command{
 	Use:   "beta:push",
@@ -19,17 +23,20 @@ var pushCmd = &cobra.Command{
 	Long: `Upload captured events that have not been pushed yet. Repeated runs upload
 only events captured since the last push.
 
-Claude memory files (~/.claude/projects/<project>/memory/*.md) for the projects
-you have captured sessions for are uploaded too. Because memory files are edited
-in place, a file that changed both locally and in the cloud is merged with the
-local claude CLI rather than overwritten; pass --skip-memories to upload only
-events.
+Pass --memories to also upload Claude memory files
+(~/.claude/projects/<project>/memory/*.md) for the projects you have captured
+sessions for. Because memory files are edited in place, a file that changed both
+locally and in the cloud is merged with the local claude CLI rather than
+overwritten. Add --all-projects to include projects with no captured session.
 
 Set AMIKA_API_KEY to authenticate.`,
 	Args:          cobra.NoArgs,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, _ []string) error {
+		if allMemoryProjects && !uploadMemories {
+			return fmt.Errorf("--all-projects requires --memories")
+		}
 		key := os.Getenv(config.EnvAPIKey)
 		if key == "" {
 			return fmt.Errorf("set %s to push; amikalog authenticates with an org API key only", config.EnvAPIKey)
@@ -54,12 +61,12 @@ Set AMIKA_API_KEY to authenticate.`,
 		}
 		failed := report.Failed
 
-		if !skipMemories {
+		if uploadMemories {
 			home, herr := os.UserHomeDir()
 			if herr != nil {
 				return fmt.Errorf("resolving home directory: %w", herr)
 			}
-			mreport, merr := eventlog.PushMemories(stateDir, home, uploader, apiDownloader{client: client}, eventlog.NewClaudeMerger())
+			mreport, merr := eventlog.PushMemories(stateDir, home, allMemoryProjects, uploader, apiDownloader{client: client}, eventlog.NewClaudeMerger())
 			if merr != nil {
 				return fmt.Errorf("pushing memories: %w", merr)
 			}
@@ -117,6 +124,7 @@ func (a apiDownloader) Fetch(objectKey string) ([]byte, bool, error) {
 }
 
 func init() {
-	pushCmd.Flags().BoolVar(&skipMemories, "skip-memories", false, "Do not upload Claude memory files, only captured events")
+	pushCmd.Flags().BoolVar(&uploadMemories, "memories", false, "Also upload Claude memory files for projects with captured sessions")
+	pushCmd.Flags().BoolVar(&allMemoryProjects, "all-projects", false, "With --memories, include projects that have no captured session")
 	rootCmd.AddCommand(pushCmd)
 }
