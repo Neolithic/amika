@@ -552,8 +552,8 @@ func TestSecretClaudePush_Force(t *testing.T) {
 	var mu sync.Mutex
 	var deletedIDs []string
 	mockEnv := setupMockClaudeAPIRecording(t, &mu, &deletedIDs, []map[string]string{
-		{"id": "cred-existing-1", "name": "Test OAuth", "type": "oauth"},
-		{"id": "cred-other-2", "name": "Other", "type": "oauth"},
+		{"id": "cred-existing-1", "name": "Test OAuth", "type": "oauth", "scope": "user"},
+		{"id": "cred-other-2", "name": "Other", "type": "oauth", "scope": "user"},
 	})
 
 	cmd := exec.Command(bin, "secret", "claude", "push",
@@ -576,13 +576,81 @@ func TestSecretClaudePush_Force(t *testing.T) {
 	}
 }
 
+// TestSecretClaudePush_ForceOrgScope verifies that --force --scope org
+// replaces whatever org-scoped credential exists (the server allows only
+// one per provider, regardless of name), while leaving a same-named
+// user-scoped credential untouched.
+func TestSecretClaudePush_ForceOrgScope(t *testing.T) {
+	bin := buildAmika(t)
+
+	var mu sync.Mutex
+	var deletedIDs []string
+	mockEnv := setupMockClaudeAPIRecording(t, &mu, &deletedIDs, []map[string]string{
+		{"id": "cred-user-1", "name": "Test OAuth", "type": "oauth", "scope": "user"},
+		{"id": "cred-org-2", "name": "Differently Named Org Cred", "type": "oauth", "scope": "org"},
+	})
+
+	cmd := exec.Command(bin, "secret", "claude", "push",
+		"--force",
+		"--scope", "org",
+		"--value", `{"claudeAiOauth":{"accessToken":"test"}}`,
+		"--name", "Test OAuth")
+	cmd.Env = mockEnv
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "Updated") {
+		t.Fatalf("expected 'Updated' in output for forced overwrite, got:\n%s", out)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(deletedIDs) != 1 || deletedIDs[0] != "cred-org-2" {
+		t.Fatalf("expected only the org-scoped credential to be deleted regardless of name, got: %v", deletedIDs)
+	}
+}
+
+// TestSecretClaudePush_ForceUserScopeIgnoresOrg verifies that --force at
+// user scope does not delete a same-named org-scoped credential, since the
+// two legitimately coexist.
+func TestSecretClaudePush_ForceUserScopeIgnoresOrg(t *testing.T) {
+	bin := buildAmika(t)
+
+	var mu sync.Mutex
+	var deletedIDs []string
+	mockEnv := setupMockClaudeAPIRecording(t, &mu, &deletedIDs, []map[string]string{
+		{"id": "cred-org-1", "name": "Test OAuth", "type": "oauth", "scope": "org"},
+	})
+
+	cmd := exec.Command(bin, "secret", "claude", "push",
+		"--force",
+		"--scope", "user",
+		"--value", `{"claudeAiOauth":{"accessToken":"test"}}`,
+		"--name", "Test OAuth")
+	cmd.Env = mockEnv
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success, got error: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "Created") {
+		t.Fatalf("expected 'Created' (no overwrite) at user scope, got:\n%s", out)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(deletedIDs) != 0 {
+		t.Fatalf("expected no deletes at user scope when only an org cred matches, got: %v", deletedIDs)
+	}
+}
+
 func TestSecretClaudePush_NoForceDoesNotDelete(t *testing.T) {
 	bin := buildAmika(t)
 
 	var mu sync.Mutex
 	var deletedIDs []string
 	mockEnv := setupMockClaudeAPIRecording(t, &mu, &deletedIDs, []map[string]string{
-		{"id": "cred-existing-1", "name": "Test OAuth", "type": "oauth"},
+		{"id": "cred-existing-1", "name": "Test OAuth", "type": "oauth", "scope": "user"},
 	})
 
 	cmd := exec.Command(bin, "secret", "claude", "push",

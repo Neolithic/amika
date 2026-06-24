@@ -285,7 +285,8 @@ func (c *Client) UpdateSecret(id string, req UpdateSecretRequest) error {
 type CreateProviderSecretRequest struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
-	Type  string `json:"type"` // "oauth" or "api_key" — required by the server
+	Type  string `json:"type"`            // "oauth" or "api_key" — required by the server
+	Scope string `json:"scope,omitempty"` // "user" (default) or "org"; omitted means the server default
 }
 
 // ProviderSecretSummary is the response from POST /api/v0beta1/secrets/<provider>.
@@ -298,9 +299,10 @@ type ProviderSecretSummary struct {
 // ProviderSecretListItem is an item in the GET /api/v0beta1/secrets/<provider>
 // response.
 type ProviderSecretListItem struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Type string `json:"type"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Scope string `json:"scope"` // "user" or "org"
 }
 
 // CreateProviderSecret uploads provider-scoped credentials (e.g. Claude,
