@@ -606,15 +606,24 @@ func (c *Client) DownloadFromSignedURL(signedURL string) ([]byte, error) {
 }
 
 // GetObjectByKey fetches the current bytes of a single object by its exact
-// bucket key. There is no single-object endpoint, so it lists the subtree at
-// key (a prefix listing returns the object under its own key, possibly
-// alongside keys that share it as a prefix) and downloads the entry whose Key
-// matches exactly. found is false when no object has that exact key, which the
-// caller can treat as "no cloud copy yet".
+// bucket key. There is no single-object endpoint, so it lists the object's
+// parent folder and downloads the entry whose Key matches exactly. found is
+// false when no object has that exact key, which the caller can treat as "no
+// cloud copy yet".
+//
+// The listing is restricted to the parent prefix (everything up to and
+// including the final "/") rather than the full key: the storage backend treats
+// a listing prefix as a folder path, so a prefix equal to the full object key
+// (filename included) matches nothing. Listing the folder and exact-matching
+// within it is the only reliable way to find the object.
 func (c *Client) GetObjectByKey(key string) (data []byte, found bool, err error) {
+	prefix := ""
+	if i := strings.LastIndex(key, "/"); i >= 0 {
+		prefix = key[:i+1]
+	}
 	cursor := ""
 	for {
-		resp, err := c.ListDownloads(key, cursor, 0)
+		resp, err := c.ListDownloads(prefix, cursor, 0)
 		if err != nil {
 			return nil, false, err
 		}
